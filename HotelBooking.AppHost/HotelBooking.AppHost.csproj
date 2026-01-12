@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsAspireHost>true</IsAspireHost>
+    <UserSecretsId>8bf1719f-cdd2-478e-adb3-b8f6b1a13b9b</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" Version="8.2.2" />
+    <PackageReference Include="Aspire.Hosting.NodeJs" Version="8.2.2" />
+    <PackageReference Include="Aspire.Hosting.Redis" Version="8.2.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HotelBooking.AdminAPI\HotelBooking.AdminAPI.csproj" />
+    <ProjectReference Include="..\HotelBooking.ClientAPI\HotelBooking.ClientAPI.csproj" />
+    <ProjectReference Include="..\HotelBooking.NotificationAPI\HotelBooking.NotificationAPI.csproj" />
+    <ProjectReference Include="..\HotelBooking.Gateway\HotelBookingGateway.csproj" />
+    <ProjectReference Include="..\HotelBooking.ServiceDefaults\HotelBooking.ServiceDefaults.csproj" IsAspireProjectResource="false" />
+  </ItemGroup>
+
+</Project>

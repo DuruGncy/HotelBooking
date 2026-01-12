@@ -1,0 +1,225 @@
+### Hotel Search API Tests
+### These tests can be used with VS Code REST Client extension
+
+@baseUrl = https://localhost:7001/api/HotelSearch
+
+### 1. Search Hotels - POST (New York)
+POST {{baseUrl}}/search
+Content-Type: application/json
+
+{
+  "destination": "New York",
+  "checkInDate": "2024-03-01T00:00:00Z",
+  "checkOutDate": "2024-03-05T00:00:00Z",
+  "numberOfGuests": 2,
+  "numberOfRooms": 1
+}
+
+### 2. Search Hotels - POST (Miami)
+POST {{baseUrl}}/search
+Content-Type: application/json
+
+{
+  "destination": "Miami",
+  "checkInDate": "2024-03-10T00:00:00Z",
+  "checkOutDate": "2024-03-15T00:00:00Z",
+  "numberOfGuests": 4,
+  "numberOfRooms": 1
+}
+
+### 3. Search Hotels - POST (Multiple Rooms)
+POST {{baseUrl}}/search
+Content-Type: application/json
+
+{
+  "destination": "New York",
+  "checkInDate": "2024-04-01T00:00:00Z",
+  "checkOutDate": "2024-04-07T00:00:00Z",
+  "numberOfGuests": 4,
+  "numberOfRooms": 2
+}
+
+### 4. Search Hotels - GET with Query Parameters
+GET {{baseUrl}}/search?destination=New York&checkInDate=2024-03-01T00:00:00Z&checkOutDate=2024-03-05T00:00:00Z&numberOfGuests=2&numberOfRooms=1
+
+### 5. Get Hotel Details by ID
+GET {{baseUrl}}/hotels/1?checkInDate=2024-03-01T00:00:00Z&checkOutDate=2024-03-05T00:00:00Z&numberOfGuests=2
+
+### 6. Get Hotel Details - Miami Resort
+GET {{baseUrl}}/hotels/2?checkInDate=2024-03-10T00:00:00Z&checkOutDate=2024-03-15T00:00:00Z&numberOfGuests=4
+
+### 7. Quick Search - New York
+GET {{baseUrl}}/quick-search?destination=New York&checkIn=2024-03-01T00:00:00Z&checkOut=2024-03-05T00:00:00Z&guests=2
+
+### 8. Quick Search - Miami
+GET {{baseUrl}}/quick-search?destination=Miami&checkIn=2024-03-10T00:00:00Z&checkOut=2024-03-15T00:00:00Z&guests=4
+
+### 9. Search with Case Insensitive Destination
+POST {{baseUrl}}/search
+Content-Type: application/json
+
+{
+  "destination": "miami",
+  "checkInDate": "2024-03-01T00:00:00Z",
+  "checkOutDate": "2024-03-05T00:00:00Z",
+  "numberOfGuests": 2,
+  "numberOfRooms": 1
+}
+
+### 10. Search with Partial Destination Match
+POST {{baseUrl}}/search
+Content-Type: application/json
+
+{
+  "destination": "York",
+  "checkInDate": "2024-03-01T00:00:00Z",
+  "checkOutDate": "2024-03-05T00:00:00Z",
+  "numberOfGuests": 2,
+  "numberOfRooms": 1
+}
+
+### ERROR CASES
+
+### 11. Search with Past Check-in Date (Should Fail - 400)
+POST {{baseUrl}}/search
+Content-Type: application/json
+
+{
+  "destination": "New York",
+  "checkInDate": "2020-01-01T00:00:00Z",
+  "checkOutDate": "2020-01-05T00:00:00Z",
+  "numberOfGuests": 2,
+  "numberOfRooms": 1
+}
+
+### 12. Search with Invalid Date Range (Should Fail - 400)
+POST {{baseUrl}}/search
+Content-Type: application/json
+
+{
+  "destination": "New York",
+  "checkInDate": "2024-03-05T00:00:00Z",
+  "checkOutDate": "2024-03-01T00:00:00Z",
+  "numberOfGuests": 2,
+  "numberOfRooms": 1
+}
+
+### 13. Search with Missing Destination (Should Fail - 400)
+POST {{baseUrl}}/search
+Content-Type: application/json
+
+{
+  "destination": "",
+  "checkInDate": "2024-03-01T00:00:00Z",
+  "checkOutDate": "2024-03-05T00:00:00Z",
+  "numberOfGuests": 2,
+  "numberOfRooms": 1
+}
+
+### 14. Search with Too Many Guests (Should Fail - 400)
+POST {{baseUrl}}/search
+Content-Type: application/json
+
+{
+  "destination": "New York",
+  "checkInDate": "2024-03-01T00:00:00Z",
+  "checkOutDate": "2024-03-05T00:00:00Z",
+  "numberOfGuests": 25,
+  "numberOfRooms": 1
+}
+
+### 15. Search Non-existent Destination (Returns Empty Array)
+POST {{baseUrl}}/search
+Content-Type: application/json
+
+{
+  "destination": "Tokyo",
+  "checkInDate": "2024-03-01T00:00:00Z",
+  "checkOutDate": "2024-03-05T00:00:00Z",
+  "numberOfGuests": 2,
+  "numberOfRooms": 1
+}
+
+### 16. Get Non-existent Hotel (Should Fail - 404)
+GET {{baseUrl}}/hotels/999?checkInDate=2024-03-01T00:00:00Z&checkOutDate=2024-03-05T00:00:00Z&numberOfGuests=2
+
+### EDGE CASES
+
+### 17. Search for Same Day Check-in/Check-out (Should Fail)
+POST {{baseUrl}}/search
+Content-Type: application/json
+
+{
+  "destination": "New York",
+  "checkInDate": "2024-03-01T00:00:00Z",
+  "checkOutDate": "2024-03-01T00:00:00Z",
+  "numberOfGuests": 2,
+  "numberOfRooms": 1
+}
+
+### 18. Search for Long Stay (30 days)
+POST {{baseUrl}}/search
+Content-Type: application/json
+
+{
+  "destination": "New York",
+  "checkInDate": "2024-03-01T00:00:00Z",
+  "checkOutDate": "2024-03-31T00:00:00Z",
+  "numberOfGuests": 2,
+  "numberOfRooms": 1
+}
+
+### 19. Search with Maximum Guests Per Room
+POST {{baseUrl}}/search
+Content-Type: application/json
+
+{
+  "destination": "Miami",
+  "checkInDate": "2024-03-01T00:00:00Z",
+  "checkOutDate": "2024-03-05T00:00:00Z",
+  "numberOfGuests": 4,
+  "numberOfRooms": 1
+}
+
+### 20. Search Requiring Multiple Room Types
+# This should only show rooms that can accommodate 3+ guests
+POST {{baseUrl}}/search
+Content-Type: application/json
+
+{
+  "destination": "New York",
+  "checkInDate": "2024-03-01T00:00:00Z",
+  "checkOutDate": "2024-03-05T00:00:00Z",
+  "numberOfGuests": 3,
+  "numberOfRooms": 1
+}
+
+### INTEGRATION TESTS (After Admin adds availability)
+
+### 21. First, add availability as admin (use AdminHotels.http)
+# Then search to verify it appears
+
+### 22. Search immediately after admin adds availability
+POST {{baseUrl}}/search
+Content-Type: application/json
+
+{
+  "destination": "New York",
+  "checkInDate": "2024-05-01T00:00:00Z",
+  "checkOutDate": "2024-05-05T00:00:00Z",
+  "numberOfGuests": 2,
+  "numberOfRooms": 1
+}
+
+### 23. Search for dates outside admin-defined availability
+# Should return empty or different results
+POST {{baseUrl}}/search
+Content-Type: application/json
+
+{
+  "destination": "New York",
+  "checkInDate": "2025-01-01T00:00:00Z",
+  "checkOutDate": "2025-01-05T00:00:00Z",
+  "numberOfGuests": 2,
+  "numberOfRooms": 1
+}

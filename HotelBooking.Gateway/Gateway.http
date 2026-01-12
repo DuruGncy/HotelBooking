@@ -1,0 +1,245 @@
+### API Gateway Test Requests
+### Update the gateway URL based on Aspire Dashboard
+@gatewayUrl = https://localhost:7XXX
+@adminToken = your-jwt-token-here
+
+### ===== Gateway Health & Discovery =====
+
+### Gateway Health Check
+GET {{gatewayUrl}}/health
+
+###
+
+### Service Discovery
+GET {{gatewayUrl}}/services
+
+###
+
+### ===== Service Health Checks =====
+
+### Admin API Health (through gateway)
+GET {{gatewayUrl}}/admin/health
+
+###
+
+### Client API Health (through gateway)
+GET {{gatewayUrl}}/client/health
+
+###
+
+### Notification API Health (through gateway)
+GET {{gatewayUrl}}/notification/health
+
+###
+
+### ===== AdminAPI through Gateway =====
+
+### Get All Hotels (Admin - through gateway)
+GET {{gatewayUrl}}/api/v1.0/Admin/hotels
+Authorization: Bearer {{adminToken}}
+
+###
+
+### Get All Rooms (Admin - through gateway)
+GET {{gatewayUrl}}/api/v1.0/Admin/rooms
+Authorization: Bearer {{adminToken}}
+
+###
+
+### Add Room Availability (Admin - through gateway)
+POST {{gatewayUrl}}/api/v1.0/Admin/room-availability
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "hotelId": 1,
+  "roomId": 1,
+  "startDate": "2024-03-01T00:00:00Z",
+  "endDate": "2024-03-31T00:00:00Z",
+  "availableRooms": 10,
+  "pricePerNight": 250.00
+}
+
+###
+
+### Get Room Availability by ID (Admin - through gateway)
+GET {{gatewayUrl}}/api/v1.0/Admin/room-availability/1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### ===== ClientAPI - HotelSearch through Gateway =====
+
+### Search Hotels (through gateway)
+POST {{gatewayUrl}}/api/v1.0/HotelSearch/search
+Content-Type: application/json
+
+{
+  "destination": "New York",
+  "checkInDate": "2024-03-10T00:00:00Z",
+  "checkOutDate": "2024-03-15T00:00:00Z",
+  "numberOfGuests": 2,
+  "numberOfRooms": 1
+}
+
+###
+
+### Quick Search (through gateway)
+GET {{gatewayUrl}}/api/v1.0/HotelSearch/quick-search?destination=New York&checkInDate=2024-03-10&checkOutDate=2024-03-15&numberOfGuests=2
+
+###
+
+### Get Hotel Details (through gateway)
+GET {{gatewayUrl}}/api/v1.0/HotelSearch/hotels/1
+
+###
+
+### ===== ClientAPI - BookHotel through Gateway =====
+
+### Check Availability (through gateway)
+GET {{gatewayUrl}}/api/v1.0/BookHotel/check-availability?hotelId=1&roomId=1&checkInDate=2024-03-10&checkOutDate=2024-03-15&numberOfRooms=2
+
+###
+
+### Create Booking (through gateway)
+POST {{gatewayUrl}}/api/v1.0/BookHotel/book
+Content-Type: application/json
+
+{
+  "hotelId": 1,
+  "roomId": 1,
+  "checkInDate": "2024-03-10T00:00:00Z",
+  "checkOutDate": "2024-03-15T00:00:00Z",
+  "numberOfRooms": 2,
+  "numberOfGuests": 4,
+  "guestName": "John Doe",
+  "guestEmail": "john@example.com",
+  "guestPhone": "+1-555-0123",
+  "specialRequests": "Late check-in please"
+}
+
+###
+
+### Get Booking by ID (through gateway)
+GET {{gatewayUrl}}/api/v1.0/BookHotel/1
+
+###
+
+### Get Booking by Reference (through gateway)
+GET {{gatewayUrl}}/api/v1.0/BookHotel/reference/BK20240315101530001234
+
+###
+
+### Cancel Booking (through gateway)
+POST {{gatewayUrl}}/api/v1.0/BookHotel/1/cancel
+Content-Type: application/json
+
+{
+  "reason": "Change of plans"
+}
+
+###
+
+### ===== NotificationAPI through Gateway =====
+
+### Get Pending Notifications (Admin - through gateway)
+GET {{gatewayUrl}}/api/v1.0/Notifications/pending
+Authorization: Bearer {{adminToken}}
+
+###
+
+### Get Hotel Notifications (Admin - through gateway)
+GET {{gatewayUrl}}/api/v1.0/Notifications/hotel/1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### Get Notification by ID (Admin - through gateway)
+GET {{gatewayUrl}}/api/v1.0/Notifications/1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### Trigger Low Capacity Check (Admin - through gateway)
+POST {{gatewayUrl}}/api/v1.0/Notifications/trigger/low-capacity-check
+Authorization: Bearer {{adminToken}}
+
+###
+
+### Trigger Reservation Processing (Admin - through gateway)
+POST {{gatewayUrl}}/api/v1.0/Notifications/trigger/process-reservations
+Authorization: Bearer {{adminToken}}
+
+###
+
+### ===== Legacy Routes (Backward Compatibility) =====
+
+### Search Hotels - Legacy Route (through gateway)
+POST {{gatewayUrl}}/api/HotelSearch/search
+Content-Type: application/json
+
+{
+  "destination": "Miami",
+  "checkInDate": "2024-03-10T00:00:00Z",
+  "checkOutDate": "2024-03-15T00:00:00Z",
+  "numberOfGuests": 2,
+  "numberOfRooms": 1
+}
+
+###
+
+### Get Hotels - Legacy Route (Admin - through gateway)
+GET {{gatewayUrl}}/api/Admin/hotels
+Authorization: Bearer {{adminToken}}
+
+###
+
+### Get Pending Notifications - Legacy Route (Admin - through gateway)
+GET {{gatewayUrl}}/api/Notifications/pending
+Authorization: Bearer {{adminToken}}
+
+###
+
+### ===== End-to-End Test Flow =====
+
+### Step 1: Search for Hotels
+POST {{gatewayUrl}}/api/v1.0/HotelSearch/search
+Content-Type: application/json
+
+{
+  "destination": "New York",
+  "checkInDate": "2024-03-10T00:00:00Z",
+  "checkOutDate": "2024-03-15T00:00:00Z",
+  "numberOfGuests": 2,
+  "numberOfRooms": 1
+}
+
+###
+
+### Step 2: Check Availability
+GET {{gatewayUrl}}/api/v1.0/BookHotel/check-availability?hotelId=1&roomId=1&checkInDate=2024-03-10&checkOutDate=2024-03-15&numberOfRooms=1
+
+###
+
+### Step 3: Create Booking
+POST {{gatewayUrl}}/api/v1.0/BookHotel/book
+Content-Type: application/json
+
+{
+  "hotelId": 1,
+  "roomId": 1,
+  "checkInDate": "2024-03-10T00:00:00Z",
+  "checkOutDate": "2024-03-15T00:00:00Z",
+  "numberOfRooms": 1,
+  "numberOfGuests": 2,
+  "guestName": "Jane Smith",
+  "guestEmail": "jane@example.com",
+  "guestPhone": "+1-555-9999"
+}
+
+###
+
+### Step 4: Verify Booking (use ID from Step 3 response)
+GET {{gatewayUrl}}/api/v1.0/BookHotel/1
+
+###

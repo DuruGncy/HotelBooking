@@ -1,0 +1,50 @@
+### NotificationAPI Test Requests
+### Base URL - Update port based on your Aspire configuration
+@baseUrl = https://localhost:7XXX
+@adminToken = your-jwt-token-here
+
+### Health Check (No Auth Required)
+GET {{baseUrl}}/health
+
+###
+
+### Get All Pending Notifications (Admin Only)
+GET {{baseUrl}}/api/notifications/pending
+Authorization: Bearer {{adminToken}}
+
+###
+
+### Get Notifications for Hotel 1 (Admin Only)
+GET {{baseUrl}}/api/notifications/hotel/1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### Get Notifications for Hotel 2 (Admin Only)
+GET {{baseUrl}}/api/notifications/hotel/2
+Authorization: Bearer {{adminToken}}
+
+###
+
+### Get Notification by ID (Admin Only)
+GET {{baseUrl}}/api/notifications/1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### Manually Trigger Low Capacity Check (Admin Only)
+POST {{baseUrl}}/api/notifications/trigger/low-capacity-check
+Authorization: Bearer {{adminToken}}
+
+###
+
+### Manually Trigger Reservation Processing (Admin Only)
+POST {{baseUrl}}/api/notifications/trigger/process-reservations
+Authorization: Bearer {{adminToken}}
+
+###
+
+### Test Without Authorization (Should Return 401)
+GET {{baseUrl}}/api/notifications/pending
+
+###

@@ -1,0 +1,97 @@
+## .NET Build Output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+
+## Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+
+## Rider
+.idea/
+*.sln.iml
+
+## VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+## .NET Aspire
+.aspire/
+
+## Build Results
+*.dll
+*.exe
+*.pdb
+
+## NuGet
+*.nupkg
+*.snupkg
+[Pp]ackages/
+
+## Test Results
+TestResults/
+*.trx
+coverage/
+
+## Logs
+*.log
+[Ll]ogs/
+
+## Sensitive Configuration (DO NOT COMMIT!)
+appsettings.Production.json
+appsettings.Staging.json
+secrets.json
+*.secrets.json
+
+## AWS Credentials (DO NOT COMMIT!)
+**/.aws/
+**/credentials
+**/config
+*.pem
+*.key
+
+## Environment Variables
+.env
+.env.local
+.env.production
+
+## Database Files
+*.db
+*.sqlite
+*.mdf
+*.ldf
+healthchecksdb*
+
+## Frontend (React)
+HotelBooking.Frontend/node_modules/
+HotelBooking.Frontend/build/
+HotelBooking.Frontend/dist/
+HotelBooking.Frontend/.env.local
+HotelBooking.Frontend/package-lock.json
+
+## macOS
+.DS_Store
+
+## Windows
+Thumbs.db
+[Dd]esktop.ini
+
+## Temporary
+*.tmp
+*.bak
+*.backup
+temp/
+tmp/
+
+## Keep These Files
+!appsettings.json
+!appsettings.Development.json
+!README.md
+!*.http
+!Dockerfile
+!docker-compose.yml
