@@ -30,6 +30,16 @@ class PredictReq(BaseModel):
     specialRequests: int = Field(0, ge=0)
     leadTimeDays: int = Field(14, ge=0)
 
+@app.get("/health")
+def health_check():
+    """Health check endpoint for Docker"""
+    return {
+        "status": "healthy",
+        "service": "predict-api",
+        "model_loaded": model is not None,
+        "model_path": MODEL_PATH
+    }
+
 @app.post("/api/v1/pricing/predict")
 def predict(req: PredictReq):
     if req.nights <= 0:

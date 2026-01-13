@@ -123,23 +123,20 @@ var app = builder.Build();
 // Map default endpoints (for Aspire).
 app.MapDefaultEndpoints();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+// Enable Swagger in all environments (removed environment check)
+app.UseSwagger();
+app.UseSwaggerUI(options =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI(options =>
-    {
-        var provider = app.Services.GetRequiredService<IApiVersionDescriptionProvider>();
+    var provider = app.Services.GetRequiredService<IApiVersionDescriptionProvider>();
 
-        // Create a Swagger endpoint for each version
-        foreach (var description in provider.ApiVersionDescriptions)
-        {
-            options.SwaggerEndpoint(
-                $"/swagger/{description.GroupName}/swagger.json",
-                $"Hotel Booking Notification API {description.GroupName.ToUpperInvariant()}");
-        }
-    });
-}
+    // Create a Swagger endpoint for each version
+    foreach (var description in provider.ApiVersionDescriptions)
+    {
+        options.SwaggerEndpoint(
+            $"/swagger/{description.GroupName}/swagger.json",
+            $"Hotel Booking Notification API {description.GroupName.ToUpperInvariant()}");
+    }
+});
 
 app.UseHttpsRedirection();
 app.UseCors("NotificationPolicy");

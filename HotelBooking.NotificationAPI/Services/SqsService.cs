@@ -79,7 +79,7 @@ public class SqsService : ISqsService
                 MaxNumberOfMessages = Math.Min(maxMessages, 10), // SQS max is 10
                 WaitTimeSeconds = 20, // Long polling for better efficiency
                 MessageAttributeNames = new List<string> { "All" },
-                AttributeNames = new List<string> { "All" }
+                MessageSystemAttributeNames = new List<string> { "All" }
             };
 
             var response = await _sqsClient.ReceiveMessageAsync(receiveMessageRequest);
@@ -171,14 +171,14 @@ public class SqsService : ISqsService
 
             var totalMessages = 0;
             
-            if (response.ApproximateNumberOfMessages.HasValue)
-                totalMessages += response.ApproximateNumberOfMessages.Value;
+            if (response.Attributes.TryGetValue("ApproximateNumberOfMessages", out var messagesCount))
+                totalMessages += int.Parse(messagesCount);
             
-            if (response.ApproximateNumberOfMessagesNotVisible.HasValue)
-                totalMessages += response.ApproximateNumberOfMessagesNotVisible.Value;
+            if (response.Attributes.TryGetValue("ApproximateNumberOfMessagesNotVisible", out var messagesNotVisible))
+                totalMessages += int.Parse(messagesNotVisible);
             
-            if (response.ApproximateNumberOfMessagesDelayed.HasValue)
-                totalMessages += response.ApproximateNumberOfMessagesDelayed.Value;
+            if (response.Attributes.TryGetValue("ApproximateNumberOfMessagesDelayed", out var messagesDelayed))
+                totalMessages += int.Parse(messagesDelayed);
 
             return totalMessages;
         }
@@ -196,9 +196,9 @@ public class SqsService : ISqsService
             NotificationType.LowCapacityAlert => "High",
             NotificationType.BookingConfirmation => "Medium",
             NotificationType.BookingCancellation => "Medium",
-            NotificationType.PaymentConfirmation => "High",
+            NotificationType.SystemAlert => "High",
             NotificationType.CheckInReminder => "Low",
-            NotificationType.CheckOutReminder => "Low",
+            NotificationType.BookingReminder => "Low",
             _ => "Low"
         };
     }

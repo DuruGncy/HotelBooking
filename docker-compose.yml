@@ -1,0 +1,184 @@
+version: '3.8'
+
+services:
+  # Frontend - React Application
+  frontend:
+    build:
+      context: ./HotelBooking.Frontend
+      dockerfile: Dockerfile
+    container_name: hotelbooking-frontend
+    ports:
+      - "3000:80"
+    environment:
+      - REACT_APP_ADMIN_API_URL=http://localhost:8081/api/v1.0
+      - REACT_APP_CLIENT_API_URL=http://localhost:8083/api/v1.0
+      - REACT_APP_NOTIFICATION_API_URL=http://localhost:8085/api/v1.0
+      - REACT_APP_PREDICT_API_URL=http://localhost:8087/api/v1
+    networks:
+      - hotelbooking-network
+    depends_on:
+      - adminapi
+      - clientapi
+      - notificationapi
+      - predictapi
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80 || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # Admin API - Hotel and room management
+  adminapi:
+    build:
+      context: .
+      dockerfile: HotelBooking.AdminAPI/Dockerfile
+    container_name: hotelbooking-adminapi
+    ports:
+      - "8081:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - JwtSettings__SecretKey=${JWT_SECRET_KEY:-YourDefaultSecretKeyForDevelopmentMinimum32Chars!}
+      - JwtSettings__Issuer=HotelBookingAPI
+      - JwtSettings__Audience=HotelBookingAPIUsers
+      - ConnectionStrings__HotelBookingDb=${DB_CONNECTION_STRING:-Host=postgres;Port=5432;Database=hotel_booking;Username=admin;Password=YourDatabasePassword123!}
+    networks:
+      - hotelbooking-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # Client API - Hotel search and booking
+  clientapi:
+    build:
+      context: .
+      dockerfile: HotelBooking.ClientAPI/Dockerfile
+    container_name: hotelbooking-clientapi
+    ports:
+      - "8083:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - JwtSettings__SecretKey=${JWT_SECRET_KEY:-YourDefaultSecretKeyForDevelopmentMinimum32Chars!}
+      - JwtSettings__Issuer=HotelBookingAPI
+      - JwtSettings__Audience=HotelBookingAPIUsers
+      - ConnectionStrings__HotelBookingDb=${DB_CONNECTION_STRING:-Host=postgres;Port=5432;Database=hotel_booking;Username=admin;Password=YourDatabasePassword123!}
+      - NotificationAPI__BaseUrl=http://notificationapi:8080
+      - PredictAPI__BaseUrl=http://predictapi:8000
+    networks:
+      - hotelbooking-network
+    depends_on:
+      - notificationapi
+      - predictapi
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # Notification API - Email notifications and alerts
+  notificationapi:
+    build:
+      context: .
+      dockerfile: HotelBooking.NotificationAPI/Dockerfile
+    container_name: hotelbooking-notificationapi
+    ports:
+      - "8085:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - JwtSettings__SecretKey=${JWT_SECRET_KEY:-YourDefaultSecretKeyForDevelopmentMinimum32Chars!}
+      - JwtSettings__Issuer=HotelBookingAPI
+      - JwtSettings__Audience=HotelBookingAPIUsers
+      - ConnectionStrings__HotelBookingDb=${DB_CONNECTION_STRING:-Host=postgres;Port=5432;Database=hotel_booking;Username=admin;Password=YourDatabasePassword123!}
+      - AWS__Region=${AWS_REGION:-us-east-1}
+      - AWS__SQS__QueueUrl=${SQS_QUEUE_URL}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    networks:
+      - hotelbooking-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # Predict API - ML-based pricing prediction (Python/FastAPI)
+  predictapi:
+    build:
+      context: ./HotelBooking.PredictAPI
+      dockerfile: Dockerfile
+    container_name: hotelbooking-predictapi
+    ports:
+      - "8087:8000"
+    environment:
+      - MODEL_PATH=artifacts/adr_model.joblib
+      - PYTHONUNBUFFERED=1
+    networks:
+      - hotelbooking-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # PostgreSQL Database (Optional - for local development)
+  postgres:
+    image: postgres:16-alpine
+    container_name: hotelbooking-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_DB=hotel_booking
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-YourDatabasePassword123!}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - hotelbooking-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d hotel_booking"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+  # Redis Cache (Optional - for caching)
+  redis:
+    image: redis:7-alpine
+    container_name: hotelbooking-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-YourRedisPassword123!}
+    volumes:
+      - redis-data:/data
+    networks:
+      - hotelbooking-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  hotelbooking-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
