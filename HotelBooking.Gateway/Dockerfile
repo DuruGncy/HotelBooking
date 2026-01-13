@@ -3,18 +3,18 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
 # Copy project files
-COPY HotelBooking.ClientAPI/HotelBooking.ClientAPI.csproj HotelBooking.ClientAPI/
+COPY HotelBooking.Gateway/HotelBookingGateway.csproj HotelBooking.Gateway/
 COPY HotelBooking.ServiceDefaults/HotelBooking.ServiceDefaults.csproj HotelBooking.ServiceDefaults/
 
 # Restore dependencies
-RUN dotnet restore HotelBooking.ClientAPI/HotelBooking.ClientAPI.csproj
+RUN dotnet restore HotelBooking.Gateway/HotelBookingGateway.csproj
 
 # Copy source code
-COPY HotelBooking.ClientAPI/ HotelBooking.ClientAPI/
+COPY HotelBooking.Gateway/ HotelBooking.Gateway/
 COPY HotelBooking.ServiceDefaults/ HotelBooking.ServiceDefaults/
 
 # Build and publish in one step
-WORKDIR /src/HotelBooking.ClientAPI
+WORKDIR /src/HotelBooking.Gateway
 RUN dotnet publish -c Release -o /app/publish
 
 # Stage 2: Runtime
@@ -32,15 +32,11 @@ USER appuser
 COPY --from=build /app/publish .
 
 # Expose port (HTTP only)
-EXPOSE 8083
+EXPOSE 8080
 
 # Set environment variables
-ENV ASPNETCORE_URLS=http://+:8083
+ENV ASPNETCORE_URLS=http://+:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8083/health || exit 1
-
 # Run the application
-ENTRYPOINT ["dotnet", "HotelBooking.ClientAPI.dll"]
+ENTRYPOINT ["dotnet", "HotelBookingGateway.dll"]
