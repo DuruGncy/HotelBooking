@@ -8,25 +8,46 @@ using HotelBooking.NotificationAPI.Services.Background;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ApiExplorer;
 using Microsoft.AspNetCore.Mvc.Versioning;
-using Amazon.SQS;
+using Microsoft.EntityFrameworkCore;
+using HotelBooking.NotificationAPI.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add service defaults & Aspire client integrations.
 builder.AddServiceDefaults();
 
+// ===== ADD AURORA POSTGRESQL DBCONTEXT =====
+var connectionString = builder.Configuration.GetConnectionString("HotelBookingDb");
+
+if (!string.IsNullOrEmpty(connectionString))
+{
+    builder.Services.AddDbContext<NotificationDbContext>(options =>
+    {
+        options.UseNpgsql(connectionString, npgsqlOptions =>
+        {
+            npgsqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 5,
+                maxRetryDelay: TimeSpan.FromSeconds(30),
+                errorCodesToAdd: null);
+            npgsqlOptions.CommandTimeout(30);
+        });
+    });
+    
+    Console.WriteLine("? Aurora PostgreSQL configured for NotificationAPI");
+}
+else
+{
+    Console.WriteLine("?? No database connection string found - using in-memory fallback");
+}
+// ===========================================
+
 // Add services to the container.
 builder.Services.AddControllers();
 
-// Register AWS SQS
-builder.Services.AddDefaultAWSOptions(builder.Configuration.GetAWSOptions());
-builder.Services.AddAWSService<IAmazonSQS>();
-
-// Register services
-builder.Services.AddScoped<ISqsService, SqsService>();
+// Register Notification Service
 builder.Services.AddScoped<INotificationService, NotificationService>();
 
-// Register background service for scheduled tasks
+// Register Background Service for notification processing
 builder.Services.AddHostedService<NotificationBackgroundService>();
 
 // Add API Versioning
@@ -119,6 +140,35 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// ===== AUTO-CHECK DATABASE CONNECTION =====
+if (!string.IsNullOrEmpty(connectionString))
+{
+    using (var scope = app.Services.CreateScope())
+    {
+        try
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<NotificationDbContext>();
+            
+            if (dbContext.Database.CanConnect())
+            {
+                Console.WriteLine("? Connected to Aurora PostgreSQL");
+                Console.WriteLine($"?? Hotels: {dbContext.Hotels.Count()}");
+                Console.WriteLine($"?? Bookings: {dbContext.Bookings.Count()}");
+                Console.WriteLine($"?? Notifications: {dbContext.Notifications.Count()}");
+            }
+            else
+            {
+                Console.WriteLine("? Cannot connect to database");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"? Database error: {ex.Message}");
+        }
+    }
+}
+// ===========================================
 
 // Map default endpoints (for Aspire).
 app.MapDefaultEndpoints();

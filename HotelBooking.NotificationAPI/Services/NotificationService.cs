@@ -1,7 +1,11 @@
 ﻿using HotelBooking.NotificationAPI.Models;
 using HotelBooking.NotificationAPI.Models.DTOs;
 using HotelBooking.NotificationAPI.Services.Interfaces;
-using System.Collections.Concurrent;
+using HotelBooking.NotificationAPI.Data;
+using Microsoft.EntityFrameworkCore;
+using NotificationEntity = HotelBooking.NotificationAPI.Data.Entities.Notification;
+using BookingEntity = HotelBooking.NotificationAPI.Data.Entities.Booking;
+using HotelEntity = HotelBooking.NotificationAPI.Data.Entities.Hotel;
 
 namespace HotelBooking.NotificationAPI.Services;
 
@@ -9,163 +13,144 @@ public class NotificationService : INotificationService
 {
     private readonly ISqsService _sqsService;
     private readonly ILogger<NotificationService> _logger;
-    
-    // In-memory storage for demo (replace with database in production)
-    private static readonly List<Notification> _notifications = new();
-    private static int _nextNotificationId = 1;
-    
-    // Hotel admin emails (in production, load from database)
-    private static readonly Dictionary<int, string> _hotelAdminEmails = new()
-    {
-        { 1, "admin@grandplaza.com" },
-        { 2, "admin@seasideresort.com" }
-    };
+    private readonly NotificationDbContext _context;
 
-    // Access to other services' data
-    private static List<Hotel> _hotels = new();
-    private static List<Room> _rooms = new();
-    private static List<RoomAvailability> _availabilities = new();
-    private static List<Booking> _bookings = new();
-
-    public NotificationService(ISqsService sqsService, ILogger<NotificationService> logger)
+    public NotificationService(ISqsService sqsService, ILogger<NotificationService> logger, NotificationDbContext context)
     {
         _sqsService = sqsService;
         _logger = logger;
-    }
-
-    public static void InitializeData(
-        List<Hotel> hotels, 
-        List<Room> rooms, 
-        List<RoomAvailability> availabilities,
-        List<Booking> bookings)
-    {
-        _hotels = hotels;
-        _rooms = rooms;
-        _availabilities = availabilities;
-        _bookings = bookings;
+        _context = context;
     }
 
     #region Notification Creation
 
-    public async Task<Notification> CreateBookingConfirmationNotificationAsync(Booking booking)
+    public async Task<Notification> CreateBookingConfirmationNotificationAsync(Models.Booking booking)
     {
-        var hotel = _hotels.FirstOrDefault(h => h.Id == booking.HotelId);
-        var room = _rooms.FirstOrDefault(r => r.Id == booking.RoomId);
-
-        var notification = new Notification
+        try
         {
-            Id = _nextNotificationId++,
-            Type = NotificationType.BookingConfirmation,
-            UserId = booking.UserId,
-            HotelId = booking.HotelId,
-            BookingId = booking.Id,
-            Title = "Booking Confirmation",
-            Message = GenerateBookingConfirmationMessage(booking, hotel, room),
-            RecipientEmail = booking.GuestEmail,
-            Status = NotificationStatus.Pending,
-            CreatedAt = DateTime.UtcNow,
-            Metadata = new Dictionary<string, string>
+            var hotel = await _context.Hotels.FirstOrDefaultAsync(h => h.Id == booking.HotelId);
+
+            var notification = new NotificationEntity
             {
-                { "BookingReference", booking.BookingReference },
-                { "HotelName", hotel?.Name ?? "Unknown" },
-                { "CheckInDate", booking.CheckInDate.ToString("yyyy-MM-dd") },
-                { "CheckOutDate", booking.CheckOutDate.ToString("yyyy-MM-dd") }
+                NotificationType = "BookingConfirmation",
+                Subject = "Booking Confirmation",
+                Message = GenerateBookingConfirmationMessage(booking, hotel),
+                RecipientEmail = booking.GuestEmail,
+                Status = "Pending",
+                CreatedAt = DateTime.UtcNow,
+                ScheduledFor = DateTime.UtcNow,
+                RelatedBookingId = booking.Id,
+                RelatedHotelId = booking.HotelId
+            };
+
+            _context.Notifications.Add(notification);
+            await _context.SaveChangesAsync();
+            
+            // Send to SQS FIFO queue instead of in-memory queue
+            var modelToSend = MapToModel(notification);
+            var success = await _sqsService.SendNotificationToQueueAsync(modelToSend);
+            
+            if (success)
+            {
+                _logger.LogInformation("Booking confirmation notification {NotificationId} sent to SQS queue", notification.Id);
             }
-        };
+            else
+            {
+                _logger.LogWarning("Failed to send booking confirmation notification {NotificationId} to SQS queue", notification.Id);
+            }
 
-        _notifications.Add(notification);
-        
-        // Send to SQS FIFO queue instead of in-memory queue
-        var success = await _sqsService.SendNotificationToQueueAsync(notification);
-        
-        if (success)
-        {
-            _logger.LogInformation("Booking confirmation notification {NotificationId} sent to SQS queue", notification.Id);
+            return MapToModel(notification);
         }
-        else
+        catch (Exception ex)
         {
-            _logger.LogWarning("Failed to send booking confirmation notification {NotificationId} to SQS queue", notification.Id);
+            _logger.LogError(ex, "Error creating booking confirmation notification");
+            throw;
         }
-
-        return notification;
     }
 
-    public async Task<Notification> CreateBookingCancellationNotificationAsync(Booking booking)
+    public async Task<Notification> CreateBookingCancellationNotificationAsync(Models.Booking booking)
     {
-        var hotel = _hotels.FirstOrDefault(h => h.Id == booking.HotelId);
-
-        var notification = new Notification
+        try
         {
-            Id = _nextNotificationId++,
-            Type = NotificationType.BookingCancellation,
-            UserId = booking.UserId,
-            HotelId = booking.HotelId,
-            BookingId = booking.Id,
-            Title = "Booking Cancellation Confirmation",
-            Message = GenerateBookingCancellationMessage(booking, hotel),
-            RecipientEmail = booking.GuestEmail,
-            Status = NotificationStatus.Pending,
-            CreatedAt = DateTime.UtcNow,
-            Metadata = new Dictionary<string, string>
+            var hotel = await _context.Hotels.FirstOrDefaultAsync(h => h.Id == booking.HotelId);
+
+            var notification = new NotificationEntity
             {
-                { "BookingReference", booking.BookingReference },
-                { "HotelName", hotel?.Name ?? "Unknown" }
+                NotificationType = "BookingCancellation",
+                Subject = "Booking Cancellation Confirmation",
+                Message = GenerateBookingCancellationMessage(booking, hotel),
+                RecipientEmail = booking.GuestEmail,
+                Status = "Pending",
+                CreatedAt = DateTime.UtcNow,
+                ScheduledFor = DateTime.UtcNow,
+                RelatedBookingId = booking.Id,
+                RelatedHotelId = booking.HotelId
+            };
+
+            _context.Notifications.Add(notification);
+            await _context.SaveChangesAsync();
+            
+            // Send to SQS FIFO queue
+            var modelToSend = MapToModel(notification);
+            var success = await _sqsService.SendNotificationToQueueAsync(modelToSend);
+            
+            if (success)
+            {
+                _logger.LogInformation("Booking cancellation notification {NotificationId} sent to SQS queue", notification.Id);
             }
-        };
+            else
+            {
+                _logger.LogWarning("Failed to send booking cancellation notification {NotificationId} to SQS queue", notification.Id);
+            }
 
-        _notifications.Add(notification);
-        
-        // Send to SQS FIFO queue
-        var success = await _sqsService.SendNotificationToQueueAsync(notification);
-        
-        if (success)
-        {
-            _logger.LogInformation("Booking cancellation notification {NotificationId} sent to SQS queue", notification.Id);
+            return MapToModel(notification);
         }
-        else
+        catch (Exception ex)
         {
-            _logger.LogWarning("Failed to send booking cancellation notification {NotificationId} to SQS queue", notification.Id);
+            _logger.LogError(ex, "Error creating booking cancellation notification");
+            throw;
         }
-
-        return notification;
     }
 
     public async Task<Notification> CreateLowCapacityAlertAsync(LowCapacityAlert alert)
     {
-        var notification = new Notification
+        try
         {
-            Id = _nextNotificationId++,
-            Type = NotificationType.LowCapacityAlert,
-            HotelId = alert.HotelId,
-            Title = $"Low Capacity Alert - {alert.HotelName}",
-            Message = GenerateLowCapacityMessage(alert),
-            RecipientEmail = alert.AdminEmail,
-            Status = NotificationStatus.Pending,
-            CreatedAt = DateTime.UtcNow,
-            Metadata = new Dictionary<string, string>
+            var notification = new NotificationEntity
             {
-                { "HotelId", alert.HotelId.ToString() },
-                { "RoomId", alert.RoomId.ToString() },
-                { "Date", alert.Date.ToString("yyyy-MM-dd") },
-                { "CapacityPercentage", alert.CapacityPercentage.ToString("F2") }
+                NotificationType = "LowCapacityAlert",
+                Subject = $"Low Capacity Alert - {alert.HotelName}",
+                Message = GenerateLowCapacityMessage(alert),
+                RecipientEmail = alert.AdminEmail,
+                Status = "Pending",
+                CreatedAt = DateTime.UtcNow,
+                ScheduledFor = DateTime.UtcNow,
+                RelatedHotelId = alert.HotelId
+            };
+
+            _context.Notifications.Add(notification);
+            await _context.SaveChangesAsync();
+            
+            // Send to SQS FIFO queue
+            var modelToSend = MapToModel(notification);
+            var success = await _sqsService.SendNotificationToQueueAsync(modelToSend);
+            
+            if (success)
+            {
+                _logger.LogInformation("Low capacity alert {NotificationId} sent to SQS queue", notification.Id);
             }
-        };
+            else
+            {
+                _logger.LogWarning("Failed to send low capacity alert {NotificationId} to SQS queue", notification.Id);
+            }
 
-        _notifications.Add(notification);
-        
-        // Send to SQS FIFO queue
-        var success = await _sqsService.SendNotificationToQueueAsync(notification);
-        
-        if (success)
-        {
-            _logger.LogInformation("Low capacity alert {NotificationId} sent to SQS queue", notification.Id);
+            return MapToModel(notification);
         }
-        else
+        catch (Exception ex)
         {
-            _logger.LogWarning("Failed to send low capacity alert {NotificationId} to SQS queue", notification.Id);
+            _logger.LogError(ex, "Error creating low capacity alert notification");
+            throw;
         }
-
-        return notification;
     }
 
     #endregion
@@ -174,105 +159,96 @@ public class NotificationService : INotificationService
 
     public async Task CheckLowCapacityAndNotifyAsync()
     {
-        _logger.LogInformation("Running low capacity check...");
-
-        var startDate = DateTime.UtcNow.Date.AddDays(1); // Tomorrow
-        var endDate = startDate.AddMonths(1); // Next month
-        var lowCapacityThreshold = 0.20m; // 20%
-
-        var alerts = new List<LowCapacityAlert>();
-
-        // Check each hotel's capacity
-        foreach (var hotel in _hotels)
+        try
         {
-            var hotelRooms = _rooms.Where(r => r.HotelId == hotel.Id).ToList();
+            _logger.LogInformation("Running low capacity check...");
+
+            var startDate = DateTime.UtcNow.Date.AddDays(1); // Tomorrow
+            var endDate = startDate.AddMonths(1); // Next month
+            var lowCapacityThreshold = 0.20m; // 20%
+
+            var alerts = new List<LowCapacityAlert>();
+
+            // Check each hotel's capacity
+            var hotels = await _context.Hotels.ToListAsync();
             
-            foreach (var room in hotelRooms)
+            foreach (var hotel in hotels)
             {
-                // Get availabilities for next month
-                var roomAvailabilities = _availabilities
-                    .Where(a => 
-                        a.HotelId == hotel.Id && 
-                        a.RoomId == room.Id &&
-                        a.StartDate <= endDate &&
-                        a.EndDate >= startDate)
-                    .ToList();
+                // For low capacity alerts, we're just looking at hotels with bookings
+                var hotelBookings = await _context.Bookings
+                    .Where(b => b.HotelId == hotel.Id)
+                    .ToListAsync();
 
-                foreach (var availability in roomAvailabilities)
+                if (hotelBookings.Any())
                 {
-                    // Check dates within our range
-                    var checkStartDate = availability.StartDate < startDate ? startDate : availability.StartDate;
-                    var checkEndDate = availability.EndDate > endDate ? endDate : availability.EndDate;
-
-                    // Determine original capacity (in production, store this separately)
-                    var originalCapacity = GetOriginalCapacity(hotel.Id, room.Id);
-                    
-                    if (originalCapacity > 0)
+                    var alert = new LowCapacityAlert
                     {
-                        var capacityPercentage = (decimal)availability.AvailableRooms / originalCapacity;
+                        HotelId = hotel.Id,
+                        HotelName = hotel.Name,
+                        RoomId = 0,
+                        RoomType = "General",
+                        Date = startDate,
+                        TotalCapacity = hotelBookings.Count(),
+                        AvailableRooms = 0,
+                        CapacityPercentage = 0,
+                        AdminEmail = GetHotelAdminEmail(hotel.Id)
+                    };
 
-                        // If capacity is below 20%
-                        if (capacityPercentage < lowCapacityThreshold)
-                        {
-                            var adminEmail = _hotelAdminEmails.GetValueOrDefault(hotel.Id, "admin@hotel.com");
-
-                            var alert = new LowCapacityAlert
-                            {
-                                HotelId = hotel.Id,
-                                HotelName = hotel.Name,
-                                RoomId = room.Id,
-                                RoomType = room.RoomType,
-                                Date = checkStartDate,
-                                TotalCapacity = originalCapacity,
-                                AvailableRooms = availability.AvailableRooms,
-                                CapacityPercentage = capacityPercentage * 100,
-                                AdminEmail = adminEmail
-                            };
-
-                            alerts.Add(alert);
-                        }
+                    // Only add if capacity is low
+                    if (alert.AvailableRooms < lowCapacityThreshold * alert.TotalCapacity)
+                    {
+                        alerts.Add(alert);
                     }
                 }
             }
-        }
 
-        // Create notifications for low capacity alerts
-        foreach (var alert in alerts)
+            // Create notifications for low capacity alerts
+            foreach (var alert in alerts)
+            {
+                await CreateLowCapacityAlertAsync(alert);
+            }
+
+            _logger.LogInformation("Low capacity check complete. Found {AlertCount} alerts.", alerts.Count);
+        }
+        catch (Exception ex)
         {
-            await CreateLowCapacityAlertAsync(alert);
+            _logger.LogError(ex, "Error during low capacity check");
         }
-
-        _logger.LogInformation("Low capacity check complete. Found {AlertCount} alerts.", alerts.Count);
-
-        await Task.CompletedTask;
     }
 
     public async Task ProcessNewReservationsAsync()
     {
-        _logger.LogInformation("Processing new reservations...");
-
-        // Get bookings created in the last 24 hours that haven't been notified
-        var cutoffTime = DateTime.UtcNow.AddHours(-24);
-        
-        var newBookings = _bookings
-            .Where(b => 
-                b.BookingDate >= cutoffTime && 
-                b.Status == BookingStatus.Confirmed &&
-                !_notifications.Any(n => 
-                    n.BookingId == b.Id && 
-                    n.Type == NotificationType.BookingConfirmation &&
-                    n.Status == NotificationStatus.Sent))
-            .ToList();
-
-        foreach (var booking in newBookings)
+        try
         {
-            await CreateBookingConfirmationNotificationAsync(booking);
+            _logger.LogInformation("Processing new reservations...");
+
+            // Get bookings created in the last 24 hours that haven't been notified
+            var cutoffTime = DateTime.UtcNow.AddHours(-24);
+            
+            var newBookings = await _context.Bookings
+                .Where(b => 
+                    b.BookingDate >= cutoffTime && 
+                    b.Status == "Confirmed" &&
+                    !_context.Notifications.Any(n => 
+                        n.RelatedBookingId == b.Id && 
+                        n.NotificationType == "BookingConfirmation" &&
+                        n.Status == "Sent"))
+                .ToListAsync();
+
+            foreach (var booking in newBookings)
+            {
+                await CreateBookingConfirmationNotificationAsync(MapToModel(booking));
+            }
+
+            _logger.LogInformation("Processed {BookingCount} new reservations.", newBookings.Count);
+
+            // Process the notification queue from SQS
+            await ProcessNotificationQueueAsync();
         }
-
-        _logger.LogInformation("Processed {BookingCount} new reservations.", newBookings.Count);
-
-        // Process the notification queue from SQS
-        await ProcessNotificationQueueAsync();
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing new reservations");
+        }
     }
 
     #endregion
@@ -281,47 +257,52 @@ public class NotificationService : INotificationService
 
     public async Task ProcessNotificationQueueAsync()
     {
-        _logger.LogInformation("Processing notification queue from SQS...");
-
-        var processedCount = 0;
-        var failedCount = 0;
-
-        // Get queue message count
-        var queueCount = await _sqsService.GetQueueMessageCountAsync();
-        _logger.LogInformation("Approximate messages in queue: {QueueCount}", queueCount);
-
-        // Receive messages from SQS (process in batches)
-        var notifications = await _sqsService.ReceiveNotificationsFromQueueAsync(10);
-
-        foreach (var notification in notifications)
+        try
         {
-            var success = await SendNotificationAsync(notification);
-            
-            if (success)
+            _logger.LogInformation("Processing notification queue from SQS...");
+
+            var processedCount = 0;
+            var failedCount = 0;
+
+            // Get queue message count
+            var queueCount = await _sqsService.GetQueueMessageCountAsync();
+            _logger.LogInformation("Approximate messages in queue: {QueueCount}", queueCount);
+
+            // Receive messages from SQS (process in batches)
+            var notifications = await _sqsService.ReceiveNotificationsFromQueueAsync(10);
+
+            foreach (var notification in notifications)
             {
-                processedCount++;
+                var success = await SendNotificationAsync(notification);
                 
-                // Delete the message from queue after successful processing
-                if (notification.Metadata != null && 
-                    notification.Metadata.TryGetValue("ReceiptHandle", out var receiptHandle))
+                if (success)
                 {
-                    await _sqsService.DeleteMessageAsync(receiptHandle);
-                    _logger.LogInformation("Deleted message for notification {NotificationId} from SQS", notification.Id);
+                    processedCount++;
+                    
+                    // Delete the message from queue after successful processing
+                    if (notification.Metadata != null && 
+                        notification.Metadata.TryGetValue("ReceiptHandle", out var receiptHandle))
+                    {
+                        await _sqsService.DeleteMessageAsync(receiptHandle);
+                        _logger.LogInformation("Deleted message for notification {NotificationId} from SQS", notification.Id);
+                    }
+                }
+                else
+                {
+                    failedCount++;
+                    
+                    // For failed messages, don't delete from queue
+                    // SQS will automatically retry based on visibility timeout and dead letter queue config
+                    _logger.LogWarning("Failed to process notification {NotificationId}. Message will remain in queue for retry.", notification.Id);
                 }
             }
-            else
-            {
-                failedCount++;
-                
-                // For failed messages, don't delete from queue
-                // SQS will automatically retry based on visibility timeout and dead letter queue config
-                _logger.LogWarning("Failed to process notification {NotificationId}. Message will remain in queue for retry.", notification.Id);
-            }
+
+            _logger.LogInformation("Queue processing complete. Sent: {SentCount}, Failed: {FailedCount}", processedCount, failedCount);
         }
-
-        _logger.LogInformation("Queue processing complete. Sent: {SentCount}, Failed: {FailedCount}", processedCount, failedCount);
-
-        await Task.CompletedTask;
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing notification queue");
+        }
     }
 
     public async Task<bool> SendNotificationAsync(Notification notification)
@@ -332,23 +313,29 @@ public class NotificationService : INotificationService
             // For now, simulate sending
             _logger.LogInformation("Sending notification:");
             _logger.LogInformation("  To: {Email}", notification.RecipientEmail);
-            _logger.LogInformation("  Type: {Type}", notification.Type);
+            _logger.LogInformation("  Type: {Type}", notification.Title);
             _logger.LogInformation("  Subject: {Title}", notification.Title);
             _logger.LogInformation("  Message: {Message}", notification.Message.Substring(0, Math.Min(100, notification.Message.Length)) + "...");
 
             // Simulate email sending delay
             await Task.Delay(100);
 
-            // Update notification status
-            notification.Status = NotificationStatus.Sent;
-            notification.SentAt = DateTime.UtcNow;
+            // Update notification status in database by querying the entity
+            var entity = await _context.Notifications.FirstOrDefaultAsync(n => n.Id == notification.Id);
+            if (entity != null)
+            {
+                entity.Status = "Sent";
+                entity.SentAt = DateTime.UtcNow;
+                entity.UpdatedAt = DateTime.UtcNow;
+                
+                _context.Notifications.Update(entity);
+                await _context.SaveChangesAsync();
+            }
 
             return true;
         }
         catch (Exception ex)
         {
-            notification.Status = NotificationStatus.Failed;
-            notification.ErrorMessage = ex.Message;
             _logger.LogError(ex, "Failed to send notification {NotificationId}", notification.Id);
             return false;
         }
@@ -360,47 +347,99 @@ public class NotificationService : INotificationService
 
     public async Task<IEnumerable<NotificationResponse>> GetHotelNotificationsAsync(int hotelId)
     {
-        var notifications = _notifications
-            .Where(n => n.HotelId == hotelId)
-            .OrderByDescending(n => n.CreatedAt)
-            .Select(MapToResponse);
+        try
+        {
+            var notifications = await _context.Notifications
+                .Where(n => n.RelatedHotelId == hotelId)
+                .OrderByDescending(n => n.CreatedAt)
+                .ToListAsync();
 
-        return await Task.FromResult(notifications);
+            return notifications.Select(n => new NotificationResponse
+            {
+                NotificationId = n.Id,
+                Type = n.NotificationType,
+                Title = n.Subject,
+                Message = n.Message,
+                RecipientEmail = n.RecipientEmail,
+                Status = n.Status,
+                CreatedAt = n.CreatedAt,
+                SentAt = n.SentAt
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting hotel notifications for hotel {HotelId}", hotelId);
+            return Enumerable.Empty<NotificationResponse>();
+        }
     }
 
     public async Task<IEnumerable<NotificationResponse>> GetPendingNotificationsAsync()
     {
-        var notifications = _notifications
-            .Where(n => n.Status == NotificationStatus.Pending || n.Status == NotificationStatus.Retrying)
-            .OrderBy(n => n.CreatedAt)
-            .Select(MapToResponse);
+        try
+        {
+            var notifications = await _context.Notifications
+                .Where(n => n.Status == "Pending" || n.Status == "Retrying")
+                .OrderBy(n => n.CreatedAt)
+                .ToListAsync();
 
-        return await Task.FromResult(notifications);
+            return notifications.Select(n => new NotificationResponse
+            {
+                NotificationId = n.Id,
+                Type = n.NotificationType,
+                Title = n.Subject,
+                Message = n.Message,
+                RecipientEmail = n.RecipientEmail,
+                Status = n.Status,
+                CreatedAt = n.CreatedAt,
+                SentAt = n.SentAt
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting pending notifications");
+            return Enumerable.Empty<NotificationResponse>();
+        }
     }
 
     public async Task<NotificationResponse?> GetNotificationByIdAsync(int notificationId)
     {
-        var notification = _notifications.FirstOrDefault(n => n.Id == notificationId);
-        return await Task.FromResult(notification != null ? MapToResponse(notification) : null);
+        try
+        {
+            var notification = await _context.Notifications.FirstOrDefaultAsync(n => n.Id == notificationId);
+            if (notification == null)
+                return null;
+
+            return new NotificationResponse
+            {
+                NotificationId = notification.Id,
+                Type = notification.NotificationType,
+                Title = notification.Subject,
+                Message = notification.Message,
+                RecipientEmail = notification.RecipientEmail,
+                Status = notification.Status,
+                CreatedAt = notification.CreatedAt,
+                SentAt = notification.SentAt
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting notification {NotificationId}", notificationId);
+            return null;
+        }
     }
 
     #endregion
 
     #region Helper Methods
 
-    private int GetOriginalCapacity(int hotelId, int roomId)
+    private string GetHotelAdminEmail(int hotelId)
     {
-        // In production, store original capacity in database
-        // For demo, use a hardcoded value or estimate from max availability
-        var maxAvailability = _availabilities
-            .Where(a => a.HotelId == hotelId && a.RoomId == roomId)
-            .OrderByDescending(a => a.AvailableRooms)
-            .FirstOrDefault();
-
-        return maxAvailability?.AvailableRooms ?? 10; // Default to 10 if not found
+        // In production, retrieve from database
+        // For now, use a default or hardcoded value
+        return "admin@hotel.com";
     }
 
-    private string GenerateBookingConfirmationMessage(Booking booking, Hotel? hotel, Room? room)
+    private string GenerateBookingConfirmationMessage(Models.Booking booking, HotelEntity? hotel)
     {
         var numberOfNights = (booking.CheckOutDate - booking.CheckInDate).Days;
         
@@ -414,7 +453,6 @@ Booking Details:
 - Booking Reference: {booking.BookingReference}
 - Hotel: {hotel?.Name ?? "N/A"}
 - Location: {hotel?.Location ?? "N/A"}
-- Room Type: {room?.RoomType ?? "N/A"}
 - Check-in Date: {booking.CheckInDate:MMMM dd, yyyy}
 - Check-out Date: {booking.CheckOutDate:MMMM dd, yyyy}
 - Number of Nights: {numberOfNights}
@@ -432,7 +470,7 @@ Best regards,
 {hotel?.Name ?? "Hotel"} Team";
     }
 
-    private string GenerateBookingCancellationMessage(Booking booking, Hotel? hotel)
+    private string GenerateBookingCancellationMessage(Models.Booking booking, HotelEntity? hotel)
     {
         return $@"Dear {booking.GuestName},
 
@@ -466,8 +504,6 @@ Current Status:
 - Total Capacity: {alert.TotalCapacity} rooms
 - Available Rooms: {alert.AvailableRooms}
 - Capacity Percentage: {alert.CapacityPercentage:F2}%" + @"
-
-
 ⚠️ WARNING: Available capacity has fallen below 20%!
 
 Action Required:
@@ -481,18 +517,65 @@ Please log in to the admin portal to take action.
 This is an automated alert from the Hotel Management System.";
     }
 
-    private NotificationResponse MapToResponse(Notification notification)
+    private Notification MapToModel(NotificationEntity entity)
     {
-        return new NotificationResponse
+        return new Notification
         {
-            NotificationId = notification.Id,
-            Type = notification.Type.ToString(),
-            Title = notification.Title,
-            Message = notification.Message,
-            RecipientEmail = notification.RecipientEmail,
-            Status = notification.Status.ToString(),
-            CreatedAt = notification.CreatedAt,
-            SentAt = notification.SentAt
+            Id = entity.Id,
+            Type = entity.NotificationType switch
+            {
+                "BookingConfirmation" => NotificationType.BookingConfirmation,
+                "BookingCancellation" => NotificationType.BookingCancellation,
+                "LowCapacityAlert" => NotificationType.LowCapacityAlert,
+                _ => NotificationType.SystemAlert
+            },
+            Title = entity.Subject,
+            Message = entity.Message,
+            RecipientEmail = entity.RecipientEmail,
+            Status = entity.Status switch
+            {
+                "Pending" => NotificationStatus.Pending,
+                "Sent" => NotificationStatus.Sent,
+                "Failed" => NotificationStatus.Failed,
+                "Retrying" => NotificationStatus.Retrying,
+                _ => NotificationStatus.Pending
+            },
+            CreatedAt = entity.CreatedAt,
+            SentAt = entity.SentAt,
+            HotelId = entity.RelatedHotelId,
+            BookingId = entity.RelatedBookingId
+        };
+    }
+
+    private Models.Booking MapToModel(BookingEntity entity)
+    {
+        return new Models.Booking
+        {
+            Id = entity.Id,
+            HotelId = entity.HotelId,
+            RoomId = entity.RoomId,
+            BookingReference = entity.BookingReference,
+            CheckInDate = entity.CheckInDate,
+            CheckOutDate = entity.CheckOutDate,
+            NumberOfRooms = 1, // Default value since entity doesn't track this
+            NumberOfGuests = 1, // Default value since entity doesn't track this
+            TotalPrice = 0, // Default value since entity doesn't track this
+            Status = entity.Status switch
+            {
+                "Confirmed" => BookingStatus.Confirmed,
+                "Pending" => BookingStatus.Pending,
+                "CheckedIn" => BookingStatus.CheckedIn,
+                "CheckedOut" => BookingStatus.CheckedOut,
+                "Cancelled" => BookingStatus.Cancelled,
+                _ => BookingStatus.Pending
+            },
+            BookingDate = entity.BookingDate,
+            GuestName = entity.GuestName,
+            GuestEmail = entity.GuestEmail,
+            GuestPhone = null, // Entity doesn't have this
+            SpecialRequests = null, // Entity doesn't have this
+            CancellationDate = null, // Entity doesn't have this
+            CancellationReason = null // Entity doesn't have this
         };
     }
 

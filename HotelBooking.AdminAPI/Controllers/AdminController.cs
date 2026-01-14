@@ -30,7 +30,8 @@ public class AdminController : ControllerBase
             service = "Admin API",
             status = "healthy",
             timestamp = DateTime.UtcNow,
-            description = "Admin API for managing hotel rooms and availability"
+            description = "Admin API for managing hotel rooms and availability",
+            database = "Aurora PostgreSQL"
         });
     }
 
@@ -154,9 +155,9 @@ public class AdminController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public IActionResult GetHotels()
+    public async Task<IActionResult> GetHotels()
     {
-        var hotels = Services.AdminHotelService.GetAllHotels();
+        var hotels = await _adminHotelService.GetAllHotelsAsync();
         return Ok(hotels);
     }
 
@@ -167,9 +168,23 @@ public class AdminController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public IActionResult GetRooms()
+    public async Task<IActionResult> GetRooms()
     {
-        var rooms = Services.AdminHotelService.GetAllRooms();
+        var rooms = await _adminHotelService.GetAllRoomsAsync();
         return Ok(rooms);
+    }
+
+    /// <summary>
+    /// Get all room availabilities (for viewing)
+    /// </summary>
+    [HttpGet("availabilities")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetAvailabilities()
+    {
+        var availabilities = await _adminHotelService.GetAllAvailabilitiesAsync();
+        return Ok(availabilities);
     }
 }

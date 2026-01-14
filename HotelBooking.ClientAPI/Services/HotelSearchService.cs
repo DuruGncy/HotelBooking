@@ -1,26 +1,21 @@
 using HotelBooking.ClientAPI.Models;
 using HotelBooking.ClientAPI.Models.DTOs;
 using HotelBooking.ClientAPI.Services.Interfaces;
+using HotelBooking.ClientAPI.Data;
+using Microsoft.EntityFrameworkCore;
+using RoomAvailabilityEntity = HotelBooking.ClientAPI.Data.Entities.RoomAvailability;
 
 namespace HotelBooking.ClientAPI.Services;
 
 public class HotelSearchService : IHotelSearchService
 {
-    // In a real application, replace this with database access via DbContext
-    // For now, we'll access the same in-memory data as AdminHotelService
-    private static readonly List<Hotel> _hotels = new();
-    private static readonly List<Room> _rooms = new();
-    private static readonly List<RoomAvailability> _availabilities = new();
+    private readonly ClientDbContext _context;
+    private readonly ILogger<HotelSearchService> _logger;
 
-    // This method allows AdminHotelService to share data (temporary solution for demo)
-    public static void InitializeData(List<Hotel> hotels, List<Room> rooms, List<RoomAvailability> availabilities)
+    public HotelSearchService(ClientDbContext context, ILogger<HotelSearchService> logger)
     {
-        _hotels.Clear();
-        _hotels.AddRange(hotels);
-        _rooms.Clear();
-        _rooms.AddRange(rooms);
-        _availabilities.Clear();
-        _availabilities.AddRange(availabilities);
+        _context = context;
+        _logger = logger;
     }
 
     public async Task<IEnumerable<HotelSearchResponse>> SearchHotelsAsync(HotelSearchRequest request)
@@ -28,37 +23,117 @@ public class HotelSearchService : IHotelSearchService
         // Validate dates
         ValidateSearchRequest(request);
 
-        // Search for hotels by destination (case-insensitive)
-        var matchingHotels = _hotels
-            .Where(h => h.Location.Contains(request.Destination, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        if (!matchingHotels.Any())
+        try
         {
-            return Enumerable.Empty<HotelSearchResponse>();
+            // Search for hotels by destination (case-insensitive)
+            var matchingHotels = await _context.Hotels
+                .Where(h => h.Location.ToLower().Contains(request.Destination.ToLower()))
+                .ToListAsync();
+
+            if (!matchingHotels.Any())
+            {
+                return Enumerable.Empty<HotelSearchResponse>();
+            }
+
+            var results = new List<HotelSearchResponse>();
+            var numberOfNights = (request.CheckOutDate - request.CheckInDate).Days;
+
+            foreach (var hotel in matchingHotels)
+            {
+                var hotelRooms = await _context.Rooms
+                    .Where(r => r.HotelId == hotel.Id)
+                    .ToListAsync();
+                
+                var availableRooms = new List<AvailableRoomInfo>();
+
+                foreach (var room in hotelRooms)
+                {
+                    // Check if room can accommodate the number of guests
+                    if (room.MaxOccupancy < request.NumberOfGuests)
+                        continue;
+
+                    // Find available room count for the requested date range
+                    var availability = await GetRoomAvailabilityAsync(room.Id, hotel.Id, request.CheckInDate, request.CheckOutDate);
+
+                    if (availability != null && availability.AvailableRooms >= request.NumberOfRooms)
+                    {
+                        var totalPrice = availability.PricePerNight * numberOfNights * request.NumberOfRooms;
+                        
+                        availableRooms.Add(new AvailableRoomInfo
+                        {
+                            RoomId = room.Id,
+                            RoomType = room.RoomType,
+                            Description = room.Description,
+                            MaxOccupancy = room.MaxOccupancy,
+                            Amenities = room.Amenities,
+                            PricePerNight = availability.PricePerNight,
+                            AvailableCount = availability.AvailableRooms,
+                            TotalPrice = totalPrice
+                        });
+                    }
+                }
+
+                // Only include hotels with available rooms
+                if (availableRooms.Any())
+                {
+                    var lowestPrice = availableRooms.Min(r => r.PricePerNight);
+                    var totalAvailableRooms = availableRooms.Sum(r => r.AvailableCount);
+
+                    results.Add(new HotelSearchResponse
+                    {
+                        HotelId = hotel.Id,
+                        HotelName = hotel.Name,
+                        Location = hotel.Location,
+                        Description = hotel.Description,
+                        StarRating = hotel.StarRating,
+                        AvailableRooms = availableRooms,
+                        LowestPricePerNight = lowestPrice,
+                        TotalPrice = lowestPrice * numberOfNights * request.NumberOfRooms,
+                        TotalAvailableRooms = totalAvailableRooms
+                    });
+                }
+            }
+
+            // Sort by lowest price
+            return results.OrderBy(r => r.LowestPricePerNight);
         }
-
-        var results = new List<HotelSearchResponse>();
-        var numberOfNights = (request.CheckOutDate - request.CheckInDate).Days;
-
-        foreach (var hotel in matchingHotels)
+        catch (Exception ex)
         {
-            var hotelRooms = _rooms.Where(r => r.HotelId == hotel.Id).ToList();
+            _logger.LogError(ex, "Error searching hotels with destination {Destination}", request.Destination);
+            throw;
+        }
+    }
+
+    public async Task<HotelSearchResponse?> GetHotelDetailsAsync(int hotelId, DateTime checkInDate, DateTime checkOutDate, int numberOfGuests)
+    {
+        try
+        {
+            var hotel = await _context.Hotels.FirstOrDefaultAsync(h => h.Id == hotelId);
+            if (hotel == null)
+                return null;
+
+            // Validate dates
+            if (checkInDate < DateTime.UtcNow.Date)
+                throw new ArgumentException("Check-in date cannot be in the past");
+
+            if (checkOutDate <= checkInDate)
+                throw new ArgumentException("Check-out date must be after check-in date");
+
+            var numberOfNights = (checkOutDate - checkInDate).Days;
+            var hotelRooms = await _context.Rooms
+                .Where(r => r.HotelId == hotel.Id)
+                .ToListAsync();
+            
             var availableRooms = new List<AvailableRoomInfo>();
 
             foreach (var room in hotelRooms)
             {
-                // Check if room can accommodate the number of guests
-                if (room.MaxOccupancy < request.NumberOfGuests)
-                    continue;
+                var availability = await GetRoomAvailabilityAsync(room.Id, hotel.Id, checkInDate, checkOutDate);
 
-                // Find available room count for the requested date range
-                var availability = GetRoomAvailability(room.Id, hotel.Id, request.CheckInDate, request.CheckOutDate);
-
-                if (availability != null && availability.AvailableRooms >= request.NumberOfRooms)
+                if (availability != null && availability.AvailableRooms > 0)
                 {
-                    var totalPrice = availability.PricePerNight * numberOfNights * request.NumberOfRooms;
-                    
+                    var totalPrice = availability.PricePerNight * numberOfNights;
+
                     availableRooms.Add(new AvailableRoomInfo
                     {
                         RoomId = room.Id,
@@ -73,103 +148,53 @@ public class HotelSearchService : IHotelSearchService
                 }
             }
 
-            // Only include hotels with available rooms
-            if (availableRooms.Any())
+            if (!availableRooms.Any())
+                return null;
+
+            var lowestPrice = availableRooms.Min(r => r.PricePerNight);
+
+            return new HotelSearchResponse
             {
-                var lowestPrice = availableRooms.Min(r => r.PricePerNight);
-                var totalAvailableRooms = availableRooms.Sum(r => r.AvailableCount);
-
-                results.Add(new HotelSearchResponse
-                {
-                    HotelId = hotel.Id,
-                    HotelName = hotel.Name,
-                    Location = hotel.Location,
-                    Description = hotel.Description,
-                    StarRating = hotel.StarRating,
-                    AvailableRooms = availableRooms,
-                    LowestPricePerNight = lowestPrice,
-                    TotalPrice = lowestPrice * numberOfNights * request.NumberOfRooms,
-                    TotalAvailableRooms = totalAvailableRooms
-                });
-            }
+                HotelId = hotel.Id,
+                HotelName = hotel.Name,
+                Location = hotel.Location,
+                Description = hotel.Description,
+                StarRating = hotel.StarRating,
+                AvailableRooms = availableRooms,
+                LowestPricePerNight = lowestPrice,
+                TotalPrice = lowestPrice * numberOfNights,
+                TotalAvailableRooms = availableRooms.Sum(r => r.AvailableCount)
+            };
         }
-
-        // Sort by lowest price
-        return await Task.FromResult(results.OrderBy(r => r.LowestPricePerNight));
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting hotel details for hotel {HotelId}", hotelId);
+            throw;
+        }
     }
 
-    public async Task<HotelSearchResponse?> GetHotelDetailsAsync(int hotelId, DateTime checkInDate, DateTime checkOutDate, int numberOfGuests)
+    private async Task<RoomAvailabilityEntity?> GetRoomAvailabilityAsync(int roomId, int hotelId, DateTime checkIn, DateTime checkOut)
     {
-        var hotel = _hotels.FirstOrDefault(h => h.Id == hotelId);
-        if (hotel == null)
-            return null;
-
-        // Validate dates
-        if (checkInDate < DateTime.UtcNow.Date)
-            throw new ArgumentException("Check-in date cannot be in the past");
-
-        if (checkOutDate <= checkInDate)
-            throw new ArgumentException("Check-out date must be after check-in date");
-
-        var numberOfNights = (checkOutDate - checkInDate).Days;
-        var hotelRooms = _rooms.Where(r => r.HotelId == hotel.Id).ToList();
-        var availableRooms = new List<AvailableRoomInfo>();
-
-        foreach (var room in hotelRooms)
+        try
         {
-            var availability = GetRoomAvailability(room.Id, hotel.Id, checkInDate, checkOutDate);
+            // Find availability records that cover the entire requested period
+            var availabilityRecords = await _context.RoomAvailabilities
+                .Where(a => 
+                    a.RoomId == roomId && 
+                    a.HotelId == hotelId &&
+                    a.StartDate <= checkIn &&
+                    a.EndDate >= checkOut &&
+                    a.AvailableRooms > 0)
+                .OrderByDescending(a => a.AvailableRooms)
+                .FirstOrDefaultAsync();
 
-            if (availability != null && availability.AvailableRooms > 0)
-            {
-                var totalPrice = availability.PricePerNight * numberOfNights;
-
-                availableRooms.Add(new AvailableRoomInfo
-                {
-                    RoomId = room.Id,
-                    RoomType = room.RoomType,
-                    Description = room.Description,
-                    MaxOccupancy = room.MaxOccupancy,
-                    Amenities = room.Amenities,
-                    PricePerNight = availability.PricePerNight,
-                    AvailableCount = availability.AvailableRooms,
-                    TotalPrice = totalPrice
-                });
-            }
+            return availabilityRecords;
         }
-
-        if (!availableRooms.Any())
-            return null;
-
-        var lowestPrice = availableRooms.Min(r => r.PricePerNight);
-
-        return await Task.FromResult(new HotelSearchResponse
+        catch (Exception ex)
         {
-            HotelId = hotel.Id,
-            HotelName = hotel.Name,
-            Location = hotel.Location,
-            Description = hotel.Description,
-            StarRating = hotel.StarRating,
-            AvailableRooms = availableRooms,
-            LowestPricePerNight = lowestPrice,
-            TotalPrice = lowestPrice * numberOfNights,
-            TotalAvailableRooms = availableRooms.Sum(r => r.AvailableCount)
-        });
-    }
-
-    private RoomAvailability? GetRoomAvailability(int roomId, int hotelId, DateTime checkIn, DateTime checkOut)
-    {
-        // Find availability records that cover the entire requested period
-        var availabilityRecords = _availabilities
-            .Where(a => 
-                a.RoomId == roomId && 
-                a.HotelId == hotelId &&
-                a.StartDate <= checkIn &&
-                a.EndDate >= checkOut &&
-                a.AvailableRooms > 0)
-            .OrderByDescending(a => a.AvailableRooms)
-            .FirstOrDefault();
-
-        return availabilityRecords;
+            _logger.LogError(ex, "Error getting room availability for room {RoomId} at hotel {HotelId}", roomId, hotelId);
+            return null;
+        }
     }
 
     private void ValidateSearchRequest(HotelSearchRequest request)

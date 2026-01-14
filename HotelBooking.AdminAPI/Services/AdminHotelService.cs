@@ -1,17 +1,19 @@
-using HotelBooking.AdminAPI.Models;
 using HotelBooking.AdminAPI.Models.DTOs;
 using HotelBooking.AdminAPI.Services.Interfaces;
+using HotelBooking.AdminAPI.Data;
+using HotelBooking.AdminAPI.Data.Entities;
+using Microsoft.EntityFrameworkCore;
 
 namespace HotelBooking.AdminAPI.Services;
 
 public class AdminHotelService : IAdminHotelService
 {
-    // In a real application, replace this with a database context (e.g., DbContext)
-    // For now, using static in-memory storage
-    private static readonly List<RoomAvailability> _availabilities = new();
-    private static readonly List<Hotel> _hotels = new();
-    private static readonly List<Room> _rooms = new();
-    private static int _nextId = 1;
+    private readonly AdminDbContext _context;
+
+    public AdminHotelService(AdminDbContext context)
+    {
+        _context = context;
+    }
 
     public async Task<RoomAvailabilityResponse> AddRoomAvailabilityAsync(AddRoomAvailabilityRequest request)
     {
@@ -27,8 +29,8 @@ public class AdminHotelService : IAdminHotelService
         }
 
         // Validate hotel and room exist
-        var hotel = _hotels.FirstOrDefault(h => h.Id == request.HotelId);
-        var room = _rooms.FirstOrDefault(r => r.Id == request.RoomId && r.HotelId == request.HotelId);
+        var hotel = await _context.Hotels.FirstOrDefaultAsync(h => h.Id == request.HotelId);
+        var room = await _context.Rooms.FirstOrDefaultAsync(r => r.Id == request.RoomId && r.HotelId == request.HotelId);
 
         if (hotel == null)
         {
@@ -41,7 +43,7 @@ public class AdminHotelService : IAdminHotelService
         }
 
         // Check for overlapping availability periods
-        var hasOverlap = _availabilities.Any(a =>
+        var hasOverlap = await _context.RoomAvailabilities.AnyAsync(a =>
             a.RoomId == request.RoomId &&
             a.HotelId == request.HotelId &&
             a.StartDate < request.EndDate &&
@@ -54,26 +56,35 @@ public class AdminHotelService : IAdminHotelService
 
         var availability = new RoomAvailability
         {
-            Id = _nextId++,
             RoomId = request.RoomId,
             HotelId = request.HotelId,
             StartDate = request.StartDate,
             EndDate = request.EndDate,
             AvailableRooms = request.AvailableRooms,
             PricePerNight = request.PricePerNight,
-            CreatedAt = DateTime.UtcNow,
-            Hotel = hotel,
-            Room = room
+            CreatedAt = DateTime.UtcNow
         };
 
-        _availabilities.Add(availability);
+        _context.RoomAvailabilities.Add(availability);
+        await _context.SaveChangesAsync();
 
-        return await Task.FromResult(MapToResponse(availability));
+        // Load navigation properties
+        await _context.Entry(availability)
+            .Reference(a => a.Hotel)
+            .LoadAsync();
+        await _context.Entry(availability)
+            .Reference(a => a.Room)
+            .LoadAsync();
+
+        return MapToResponse(availability);
     }
 
     public async Task<RoomAvailabilityResponse> UpdateRoomAvailabilityAsync(UpdateRoomAvailabilityRequest request)
     {
-        var availability = _availabilities.FirstOrDefault(a => a.Id == request.AvailabilityId);
+        var availability = await _context.RoomAvailabilities
+            .Include(a => a.Hotel)
+            .Include(a => a.Room)
+            .FirstOrDefaultAsync(a => a.Id == request.AvailabilityId);
         
         if (availability == null)
         {
@@ -102,7 +113,7 @@ public class AdminHotelService : IAdminHotelService
             }
 
             // Check for overlapping availability periods (excluding current record)
-            var hasOverlap = _availabilities.Any(a =>
+            var hasOverlap = await _context.RoomAvailabilities.AnyAsync(a =>
                 a.Id != availability.Id &&
                 a.RoomId == availability.RoomId &&
                 a.HotelId == availability.HotelId &&
@@ -119,38 +130,70 @@ public class AdminHotelService : IAdminHotelService
         }
 
         availability.UpdatedAt = DateTime.UtcNow;
+        
+        await _context.SaveChangesAsync();
 
-        return await Task.FromResult(MapToResponse(availability));
+        return MapToResponse(availability);
     }
 
     public async Task<bool> DeleteRoomAvailabilityAsync(int availabilityId)
     {
-        var availability = _availabilities.FirstOrDefault(a => a.Id == availabilityId);
+        var availability = await _context.RoomAvailabilities.FindAsync(availabilityId);
         
         if (availability == null)
         {
-            return await Task.FromResult(false);
+            return false;
         }
 
-        _availabilities.Remove(availability);
+        _context.RoomAvailabilities.Remove(availability);
+        await _context.SaveChangesAsync();
         
-        return await Task.FromResult(true);
+        return true;
     }
 
     public async Task<RoomAvailabilityResponse?> GetRoomAvailabilityByIdAsync(int availabilityId)
     {
-        var availability = _availabilities.FirstOrDefault(a => a.Id == availabilityId);
-        return await Task.FromResult(availability != null ? MapToResponse(availability) : null);
+        var availability = await _context.RoomAvailabilities
+            .Include(a => a.Hotel)
+            .Include(a => a.Room)
+            .FirstOrDefaultAsync(a => a.Id == availabilityId);
+            
+        return availability != null ? MapToResponse(availability) : null;
     }
 
     public async Task<IEnumerable<RoomAvailabilityResponse>> GetRoomAvailabilitiesByHotelAsync(int hotelId)
     {
-        var availabilities = _availabilities
+        var availabilities = await _context.RoomAvailabilities
+            .Include(a => a.Hotel)
+            .Include(a => a.Room)
             .Where(a => a.HotelId == hotelId)
             .OrderBy(a => a.StartDate)
-            .Select(MapToResponse);
+            .ToListAsync();
 
-        return await Task.FromResult(availabilities);
+        return availabilities.Select(MapToResponse);
+    }
+
+    public async Task<IEnumerable<Data.Entities.Hotel>> GetAllHotelsAsync()
+    {
+        return await _context.Hotels
+            .Where(h => h.IsActive)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<Data.Entities.Room>> GetAllRoomsAsync()
+    {
+        return await _context.Rooms
+            .Include(r => r.Hotel)
+            .Where(r => r.IsActive)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<Data.Entities.RoomAvailability>> GetAllAvailabilitiesAsync()
+    {
+        return await _context.RoomAvailabilities
+            .Include(ra => ra.Hotel)
+            .Include(ra => ra.Room)
+            .ToListAsync();
     }
 
     private static RoomAvailabilityResponse MapToResponse(RoomAvailability availability)
@@ -170,116 +213,4 @@ public class AdminHotelService : IAdminHotelService
             UpdatedAt = availability.UpdatedAt
         };
     }
-
-    // Helper method to seed data for testing
-    public static void SeedTestData()
-    {
-        _hotels.Clear();
-        _rooms.Clear();
-        _availabilities.Clear();
-        
-        // Seed hotels with detailed information
-        _hotels.Add(new Hotel 
-        { 
-            Id = 1, 
-            Name = "Grand Plaza Hotel", 
-            Location = "New York", 
-            Description = "Luxury hotel in the heart of Manhattan with stunning city views",
-            StarRating = 5 
-        });
-        
-        _hotels.Add(new Hotel 
-        { 
-            Id = 2, 
-            Name = "Seaside Resort", 
-            Location = "Miami", 
-            Description = "Beachfront resort with private beach access and spa facilities",
-            StarRating = 4 
-        });
-
-        // Seed rooms with amenities
-        _rooms.Add(new Room 
-        { 
-            Id = 1, 
-            HotelId = 1, 
-            RoomType = "Deluxe Suite", 
-            MaxOccupancy = 2,
-            Description = "Spacious suite with king bed and city view",
-            Amenities = new List<string> { "WiFi", "TV", "Mini Bar", "Coffee Maker", "Safe" }
-        });
-        
-        _rooms.Add(new Room 
-        { 
-            Id = 2, 
-            HotelId = 1, 
-            RoomType = "Standard Room", 
-            MaxOccupancy = 2,
-            Description = "Comfortable room with queen bed",
-            Amenities = new List<string> { "WiFi", "TV", "Coffee Maker" }
-        });
-        
-        _rooms.Add(new Room 
-        { 
-            Id = 3, 
-            HotelId = 2, 
-            RoomType = "Ocean View Suite", 
-            MaxOccupancy = 4,
-            Description = "Large suite with ocean view and balcony",
-            Amenities = new List<string> { "WiFi", "TV", "Mini Bar", "Balcony", "Ocean View", "Jacuzzi" }
-        });
-
-        // Seed some initial availabilities for testing
-        var today = DateTime.UtcNow.Date;
-        
-        _availabilities.Add(new RoomAvailability
-        {
-            Id = _nextId++,
-            RoomId = 1,
-            HotelId = 1,
-            StartDate = today.AddDays(1),
-            EndDate = today.AddDays(90),
-            AvailableRooms = 5,
-            PricePerNight = 250.00m,
-            CreatedAt = DateTime.UtcNow,
-            Hotel = _hotels[0],
-            Room = _rooms[0]
-        });
-
-        _availabilities.Add(new RoomAvailability
-        {
-            Id = _nextId++,
-            RoomId = 2,
-            HotelId = 1,
-            StartDate = today.AddDays(1),
-            EndDate = today.AddDays(90),
-            AvailableRooms = 10,
-            PricePerNight = 150.00m,
-            CreatedAt = DateTime.UtcNow,
-            Hotel = _hotels[0],
-            Room = _rooms[1]
-        });
-
-        _availabilities.Add(new RoomAvailability
-        {
-            Id = _nextId++,
-            RoomId = 3,
-            HotelId = 2,
-            StartDate = today.AddDays(1),
-            EndDate = today.AddDays(90),
-            AvailableRooms = 8,
-            PricePerNight = 300.00m,
-            CreatedAt = DateTime.UtcNow,
-            Hotel = _hotels[1],
-            Room = _rooms[2]
-        });
-    }
-
-    // Public method to get all hotels (for viewing)
-    public static List<Hotel> GetAllHotels() => _hotels;
-    
-    // Public method to get all rooms (for viewing)
-    public static List<Room> GetAllRooms() => _rooms;
-    
-    // Public method to get all availabilities (for viewing)
-    public static List<RoomAvailability> GetAllAvailabilities() => _availabilities;
 }
