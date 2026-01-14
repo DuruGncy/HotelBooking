@@ -138,7 +138,13 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("PublicPolicy", policy =>
     {
-        policy.WithOrigins("https://www.hotels.com", "http://localhost:3001", "http://localhost:5173")
+        policy.WithOrigins(
+            "https://www.hotels.com",
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://localhost:3001",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:5173")
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
