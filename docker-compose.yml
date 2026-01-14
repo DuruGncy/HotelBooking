@@ -38,7 +38,9 @@ services:
       - REACT_APP_ADMIN_API_URL=http://localhost:8081/api/v1.0
       - REACT_APP_CLIENT_API_URL=http://localhost:8083/api/v1.0
       - REACT_APP_NOTIFICATION_API_URL=http://localhost:8085/api/v1.0
-      - REACT_APP_PREDICT_API_URL=http://localhost:8087/api/v1
+      # When running in docker-compose, point frontend to gateway by service name
+      - REACT_APP_PREDICT_API_URL=http://gateway:8080/api
+      - REACT_APP_PREDICT_API_VERSION=v1
     networks:
       - hotelbooking-network
     depends_on:

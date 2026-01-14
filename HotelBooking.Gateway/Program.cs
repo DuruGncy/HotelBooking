@@ -1,6 +1,7 @@
 using Yarp.ReverseProxy.Configuration;
 using HotelBookingGateway.Middleware;
 using Microsoft.OpenApi.Models;
+using HotelBookingGateway.Swagger;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -96,6 +97,19 @@ This gateway provides access to all Hotel Booking microservices through a single
 
 ---
 
+### 5. PredictAPI
+**Purpose:** Price prediction for bookings (machine learning service)
+
+**Base Path:** `/api/v1/pricing`
+
+**Key Endpoints:**
+- `POST /api/v1/pricing/predict` - Predict price for a booking request payload
+- `GET /health` - Predict service health (model loaded)
+
+**Authentication:** Public (gateway forwards requests)
+
+---
+
 ## Service Health Checks
 
 - `GET /admin/health` - AdminAPI health
@@ -167,6 +181,8 @@ _(Ports are assigned dynamically by Aspire - check Aspire Dashboard)_
             Array.Empty<string>()
         }
     });
+    // Add PredictAPI stub to the generated OpenAPI document
+    options.DocumentFilter<PredictDocumentFilter>();
 });
 
 // Memory cache for rate limiting
@@ -285,6 +301,33 @@ builder.Services.AddReverseProxy()
             },
             ClusterId = "notification_cluster"
         },
+        // Predict API routes - versioned
+        new RouteConfig
+        {
+            RouteId = "predict_api_versioned",
+            Match = new RouteMatch
+            {
+                Path = "/api/v{version}/pricing/{**catch-all}"
+            },
+            Transforms = new[]
+            {
+                new Dictionary<string, string>
+                {
+                    { "PathPattern", "/api/v{version}/pricing/{**catch-all}" }
+                }
+            },
+            ClusterId = "predict_cluster"
+        },
+        // Predict API routes - legacy (no version)
+        new RouteConfig
+        {
+            RouteId = "predict_api_legacy",
+            Match = new RouteMatch
+            {
+                Path = "/api/pricing/{**catch-all}"
+            },
+            ClusterId = "predict_cluster"
+        },
         // Health check routes for each service
         new RouteConfig
         {
@@ -361,6 +404,15 @@ builder.Services.AddReverseProxy()
                 { "notification", new DestinationConfig { Address = "http://notificationapi" } }
             }
         }
+        ,
+        new ClusterConfig
+        {
+            ClusterId = "predict_cluster",
+            Destinations = new Dictionary<string, DestinationConfig>
+            {
+                { "predict", new DestinationConfig { Address = "http://predictapi:8000" } }
+            }
+        }
     });
 
 var app = builder.Build();
@@ -390,6 +442,7 @@ app.UseSwaggerUI(options =>
     
     // Add custom CSS for better styling
     options.InjectStylesheet("/swagger-ui/custom.css");
+    options.InjectJavascript("/swagger-ui/custom.js");
 });
 
 // Serve custom CSS for Swagger
@@ -414,6 +467,28 @@ app.MapGet("/swagger-ui/custom.css", () => Results.Content(@"
     }
 ", "text/css"));
 
+// Serve custom JS for Swagger UI to add a diagnostic link
+app.MapGet("/swagger-ui/custom.js", () => Results.Content(@"
+document.addEventListener('DOMContentLoaded', function(){
+    try{
+        var topbar = document.querySelector('.swagger-ui .topbar .wrapper') || document.querySelector('.swagger-ui .topbar');
+        if(topbar){
+            var a = document.createElement('a');
+            a.href = '/diag/predict';
+            a.textContent = 'Diag: Predict';
+            a.style.marginLeft = '12px';
+            a.style.color = '#fff';
+            a.style.background = 'rgba(255,255,255,0.06)';
+            a.style.padding = '6px 10px';
+            a.style.borderRadius = '4px';
+            a.style.textDecoration = 'none';
+            a.target = '_blank';
+            topbar.appendChild(a);
+        }
+    }catch(e){console.warn('custom swagger js error', e)}
+});
+", "application/javascript"));
+
 app.MapControllers();
 
 // Gateway health check endpoint
@@ -427,6 +502,7 @@ app.MapGet("/health", () => Results.Ok(new {
         new { name = "AdminAPI", path = "/admin/health", swagger = "Direct service Swagger (via Aspire)" },
         new { name = "ClientAPI", path = "/client/health", swagger = "Direct service Swagger (via Aspire)" },
         new { name = "NotificationAPI", path = "/notification/health", swagger = "Direct service Swagger (via Aspire)" }
+        ,new { name = "PredictAPI", path = "/api/v1/pricing/health", swagger = "Predict API (internal)" }
     }
 })).WithName("GatewayHealth")
     .WithTags("Gateway")
@@ -436,6 +512,54 @@ app.MapGet("/health", () => Results.Ok(new {
         operation.Description = "Returns the health status of the gateway and information about connected services";
         return operation;
     });
+
+// Diagnostic page: performs a test POST to PredictAPI and renders results (HTML)
+app.MapGet("/diag/predict", async (IHttpClientFactory httpFactory) =>
+{
+    var client = httpFactory.CreateClient();
+    client.Timeout = TimeSpan.FromSeconds(5);
+
+    var sample = new
+    {
+        checkInDate = DateTime.UtcNow.AddDays(7).ToString("yyyy-MM-dd"),
+        nights = 1,
+        adults = 2,
+        children = 0,
+        hotelType = "City Hotel",
+        marketSegment = "Direct",
+        customerType = "Transient",
+        depositType = "No Deposit",
+        meal = "BB",
+        isRepeatedGuest = 0,
+        specialRequests = 0,
+        leadTimeDays = 14
+    };
+
+    string predictResultText;
+    try
+    {
+        // Call Predict API directly within the Docker network
+        var resp = await client.PostAsJsonAsync("http://predictapi:8000/api/v1/pricing/predict", sample);
+        var body = await resp.Content.ReadAsStringAsync();
+        predictResultText = $"<pre>Status: {(int)resp.StatusCode} {resp.ReasonPhrase}\n{System.Text.Encodings.Web.HtmlEncoder.Default.Encode(body)}</pre>";
+    }
+    catch (Exception ex)
+    {
+        predictResultText = $"<pre>Error calling PredictAPI: {System.Text.Encodings.Web.HtmlEncoder.Default.Encode(ex.Message)}</pre>";
+    }
+
+    var html = $@"<html><head><title>Gateway → Predict diag</title>
+        <style>body{{font-family:Arial,Helvetica,sans-serif;margin:24px}}pre{{background:#f6f6f6;padding:12px;border-radius:6px}}</style>
+        </head><body>
+        <h1>Gateway → Predict Diagnostic</h1>
+        <p><strong>Gateway:</strong> /health → <a href='/health'>/health</a></p>
+        <h2>Predict API test (via internal network)</h2>
+        {predictResultText}
+        <p>To test via gateway externally, curl <code>POST http://localhost:8089/api/v1/pricing/predict</code></p>
+        </body></html>";
+
+    return Results.Content(html, "text/html");
+}).WithName("DiagPredict");
 
 // Service discovery endpoint
 app.MapGet("/services", () => Results.Ok(new
@@ -508,6 +632,19 @@ app.MapGet("/services", () => Results.Ok(new
                 },
                 authentication = "Required (ADMIN)",
                 health = "/notification/health"
+            }
+            ,
+            new 
+            { 
+                service = "PredictAPI",
+                baseUrl = "/api/v1/pricing",
+                endpoints = new[]
+                {
+                    "POST /api/v1/pricing/predict",
+                    "GET /health"
+                },
+                authentication = "Public (proxied via gateway)",
+                health = "/api/v1/pricing/health"
             }
         }
     }
