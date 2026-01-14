@@ -1,6 +1,8 @@
 using Yarp.ReverseProxy.Configuration;
 using HotelBookingGateway.Middleware;
 using Microsoft.OpenApi.Models;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 using HotelBookingGateway.Swagger;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,6 +23,28 @@ builder.Services.ConfigureHttpClientDefaults(http =>
 // Required for Swagger UI
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+
+// Configure AWS Cognito JWT validation (read values from config or environment)
+var cognitoRegion = builder.Configuration["Cognito:Region"] ?? Environment.GetEnvironmentVariable("COGNITO_REGION");
+var cognitoUserPoolId = builder.Configuration["Cognito:UserPoolId"] ?? Environment.GetEnvironmentVariable("COGNITO_USERPOOL_ID");
+var cognitoAppClientId = builder.Configuration["Cognito:AppClientId"] ?? Environment.GetEnvironmentVariable("COGNITO_APP_CLIENT_ID");
+
+if (!string.IsNullOrEmpty(cognitoRegion) && !string.IsNullOrEmpty(cognitoUserPoolId) && !string.IsNullOrEmpty(cognitoAppClientId))
+{
+    var authority = $"https://cognito-idp.{cognitoRegion}.amazonaws.com/{cognitoUserPoolId}";
+    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options =>
+        {
+            options.Authority = authority;
+            options.Audience = cognitoAppClientId;
+            options.RequireHttpsMetadata = true;
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidateAudience = true
+            };
+        });
+}
 
 // Configure Swagger for Gateway with service documentation
 builder.Services.AddSwaggerGen(options =>
@@ -427,6 +451,28 @@ app.UseGatewayMiddleware();
 app.UseCors();
 
 app.UseRouting();
+
+// Enable authentication/authorization if configured
+app.UseAuthentication();
+app.UseAuthorization();
+
+// Enforce authentication at the gateway for Admin routes (if auth configured)
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value ?? string.Empty;
+    // Admin API paths (versioned or legacy)
+    if ((path.StartsWith("/api/v") && path.Contains("/Admin/")) || path.StartsWith("/api/Admin/"))
+    {
+        if (!context.User?.Identity?.IsAuthenticated ?? true)
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+    }
+
+    await next();
+});
 
 // Enable Swagger in all environments (for gateway documentation)
 app.UseSwagger();

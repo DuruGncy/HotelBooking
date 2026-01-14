@@ -28,6 +28,8 @@ builder.Services.AddScoped<INotificationService, NotificationService>();
 
 // Register background service for scheduled tasks
 builder.Services.AddHostedService<NotificationBackgroundService>();
+// Register SQS polling hosted service to process notifications continuously
+builder.Services.AddHostedService<HotelBooking.NotificationAPI.Services.Background.SqsPollingService>();
 
 // Add API Versioning
 builder.Services.AddApiVersioning(options =>

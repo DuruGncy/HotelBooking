@@ -12,6 +12,9 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080
+      - COGNITO_REGION=eu-central-1
+      - COGNITO_USERPOOL_ID=eu-central-1_Z4DE2Baso
+      - COGNITO_APP_CLIENT_ID=6b3sk3g2fv17o31l33tvlv63l0
     networks:
       - hotelbooking-network
     depends_on:
