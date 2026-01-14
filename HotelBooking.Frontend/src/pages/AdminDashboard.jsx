@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
 import {
   getHotelBookings,
   addRoomAvailability,
@@ -6,8 +6,10 @@ import {
   getNotificationStats,
   triggerLowCapacityCheck,
   triggerReservationProcessing,
+  predictPrice,
 } from '../services/api';
 import LoadingSpinner from '../components/LoadingSpinner';
+import ErrorBanner from '../components/ErrorBanner';
 
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState('bookings');
@@ -15,6 +17,15 @@ const AdminDashboard = () => {
   const [availabilities, setAvailabilities] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [predictResult, setPredictResult] = useState(null);
+  const [predictLoading, setPredictLoading] = useState(false);
+  const [predictInputs, setPredictInputs] = useState({
+    nights: 1,
+    adults: 2,
+    children: 0,
+    leadTimeDays: 14,
+  });
   const [selectedHotel, setSelectedHotel] = useState(1);
 
   const [availabilityForm, setAvailabilityForm] = useState({
@@ -26,11 +37,7 @@ const AdminDashboard = () => {
     pricePerNight: '',
   });
 
-  useEffect(() => {
-    loadData();
-  }, [activeTab, selectedHotel]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       if (activeTab === 'bookings') {
@@ -45,10 +52,15 @@ const AdminDashboard = () => {
       }
     } catch (err) {
       console.error('Error loading data:', err);
+      setError(typeof err === 'string' ? err : err.message || JSON.stringify(err));
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab, selectedHotel]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleAddAvailability = async (e) => {
     e.preventDefault();
@@ -72,7 +84,8 @@ const AdminDashboard = () => {
       });
       loadData();
     } catch (err) {
-      alert(err.error || err.message || 'Failed to add availability');
+      const msg = err?.error || err?.message || (typeof err === 'string' ? err : 'Failed to add availability');
+      setError(msg);
     }
   };
 
@@ -86,15 +99,49 @@ const AdminDashboard = () => {
         alert('Reservation processing triggered successfully!');
       }
     } catch (err) {
-      alert('Failed to trigger task');
+      const msg = err?.error || err?.message || (typeof err === 'string' ? err : 'Failed to trigger task');
+      setError(msg);
+    }
+  };
+
+  const handlePredict = async () => {
+    setError(null);
+    setPredictResult(null);
+    setPredictLoading(true);
+    try {
+      const checkInDate = availabilityForm.startDate || new Date().toISOString().slice(0, 10);
+
+      const payload = {
+        checkInDate,
+        nights: Math.max(1, parseInt(predictInputs.nights) || 1),
+        adults: Math.max(1, parseInt(predictInputs.adults) || 1),
+        children: Math.max(0, parseInt(predictInputs.children) || 0),
+        hotelType: 'City Hotel',
+        marketSegment: 'Direct',
+        customerType: 'Transient',
+        depositType: 'No Deposit',
+        meal: 'BB',
+        isRepeatedGuest: 0,
+        specialRequests: 0,
+        leadTimeDays: Math.max(0, parseInt(predictInputs.leadTimeDays) || 0),
+      };
+
+      const res = await predictPrice(payload);
+      setPredictResult(res);
+    } catch (err) {
+      setError(err?.error || err?.message || String(err));
+    } finally {
+      setPredictLoading(false);
     }
   };
 
   return (
     <div>
+      {error && <ErrorBanner message={error} onClose={() => setError(null)} />}
+
       <div className="dashboard-header">
         <h1>Admin Dashboard</h1>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
           <select
             value={selectedHotel}
             onChange={(e) => setSelectedHotel(parseInt(e.target.value))}
@@ -103,6 +150,67 @@ const AdminDashboard = () => {
             <option value={1}>Grand Plaza Hotel</option>
             <option value={2}>Seaside Resort</option>
           </select>
+
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              Nights
+              <input
+                type="number"
+                min="1"
+                value={predictInputs.nights}
+                onChange={(e) => setPredictInputs({ ...predictInputs, nights: e.target.value })}
+                style={{ width: '4rem', padding: '0.25rem' }}
+              />
+            </label>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              Adults
+              <input
+                type="number"
+                min="1"
+                value={predictInputs.adults}
+                onChange={(e) => setPredictInputs({ ...predictInputs, adults: e.target.value })}
+                style={{ width: '3.5rem', padding: '0.25rem' }}
+              />
+            </label>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              Kids
+              <input
+                type="number"
+                min="0"
+                value={predictInputs.children}
+                onChange={(e) => setPredictInputs({ ...predictInputs, children: e.target.value })}
+                style={{ width: '3.5rem', padding: '0.25rem' }}
+              />
+            </label>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              Lead
+              <input
+                type="number"
+                min="0"
+                value={predictInputs.leadTimeDays}
+                onChange={(e) => setPredictInputs({ ...predictInputs, leadTimeDays: e.target.value })}
+                style={{ width: '4rem', padding: '0.25rem' }}
+              />
+            </label>
+
+            <button
+              onClick={handlePredict}
+              className="btn btn-outline"
+              style={{ marginLeft: '0.5rem', display: 'flex', alignItems: 'center' }}
+              disabled={predictLoading}
+            >
+              {predictLoading ? <LoadingSpinner size={18} /> : 'Predict Price'}
+            </button>
+          </div>
+
+          {predictResult && (
+            <div style={{ marginLeft: '0.75rem', padding: '0.5rem 0' }}>
+              <strong>Predicted/Night:</strong> {predictResult.predictedAdrPerNight} {predictResult.currency}
+            </div>
+          )}
         </div>
       </div>
 

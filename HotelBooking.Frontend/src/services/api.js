@@ -150,6 +150,21 @@ export const triggerReservationProcessing = async () => {
   }
 };
 
+// PREDICT API (direct call to ML service)
+export const predictPrice = async (predictPayload) => {
+  try {
+    const PREDICT_BASE = process.env.REACT_APP_PREDICT_API_URL || 'http://localhost:8087/api';
+    const PREDICT_VER = process.env.REACT_APP_PREDICT_API_VERSION || 'v1';
+    const url = `${PREDICT_BASE}/${PREDICT_VER}/pricing/predict`;
+    const response = await axios.post(url, predictPayload, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || error.message;
+  }
+};
+
 // AUTH HELPERS
 export const setAuthToken = (token) => {
   localStorage.setItem('authToken', token);

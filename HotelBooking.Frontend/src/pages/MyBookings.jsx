@@ -1,13 +1,13 @@
 ﻿import React, { useState } from 'react';
-import { getBookingByReference, cancelBooking } from '../services/api';
-import LoadingSpinner from '../components/LoadingSpinner';
+import { getBookingByReference, cancelBooking, predictPrice } from '../services/api';
 
 const MyBookings = () => {
   const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [searchReference, setSearchReference] = useState('');
   const [searchLoading, setSearchLoading] = useState(false);
+  const [predictResults, setPredictResults] = useState({});
+  const [predictLoading, setPredictLoading] = useState({});
 
   const handleSearchByReference = async (e) => {
     e.preventDefault();
@@ -35,16 +35,45 @@ const MyBookings = () => {
     try {
       const reason = prompt('Please enter cancellation reason:');
       await cancelBooking(bookingId, reason || 'User requested cancellation');
-      
+
       setBookings((prev) =>
-        prev.map((b) =>
-          b.bookingId === bookingId ? { ...b, status: 'Cancelled' } : b
-        )
+        prev.map((b) => (b.bookingId === bookingId ? { ...b, status: 'Cancelled' } : b))
       );
 
       alert('Booking cancelled successfully');
     } catch (err) {
       alert(err.message || 'Failed to cancel booking');
+    }
+  };
+
+  const handlePredictBooking = async (booking) => {
+    const id = booking.bookingId;
+    setPredictLoading((p) => ({ ...p, [id]: true }));
+    setPredictResults((p) => ({ ...p, [id]: null }));
+    try {
+      const checkInDate = booking.checkInDate;
+      const nights = booking.numberOfNights || Math.max(1, Math.round((new Date(booking.checkOutDate) - new Date(checkInDate)) / (1000 * 60 * 60 * 24)));
+      const payload = {
+        checkInDate,
+        nights,
+        adults: booking.numberOfGuests || 2,
+        children: 0,
+        hotelType: 'City Hotel',
+        marketSegment: 'Direct',
+        customerType: 'Transient',
+        depositType: 'No Deposit',
+        meal: 'BB',
+        isRepeatedGuest: 0,
+        specialRequests: 0,
+        leadTimeDays: 14,
+      };
+
+      const res = await predictPrice(payload);
+      setPredictResults((p) => ({ ...p, [id]: res }));
+    } catch (err) {
+      setPredictResults((p) => ({ ...p, [id]: { error: err?.error || err?.message || String(err) } }));
+    } finally {
+      setPredictLoading((p) => ({ ...p, [id]: false }));
     }
   };
 
@@ -89,15 +118,13 @@ const MyBookings = () => {
             <p>No bookings found. Search by booking reference above.</p>
           </div>
         )}
-        
+
         {bookings.map((booking) => (
           <div key={booking.bookingId} className="card mb-2">
             <div className="flex-between">
               <div style={{ flex: 1 }}>
                 <h3>{booking.hotelName}</h3>
-                <p style={{ color: '#666', margin: '0.5rem 0' }}>
-                  📍 {booking.hotelLocation}
-                </p>
+                <p style={{ color: '#666', margin: '0.5rem 0' }}>📍 {booking.hotelLocation}</p>
                 <p style={{ color: '#666', margin: '0.5rem 0' }}>
                   <strong>Room:</strong> {booking.roomType}
                 </p>
@@ -113,35 +140,57 @@ const MyBookings = () => {
                   {booking.numberOfRooms} | <strong>Nights:</strong> {booking.numberOfNights}
                 </p>
               </div>
-              <div style={{ textAlign: 'right' }}>
+
+              <div style={{ textAlign: 'right', minWidth: 180 }}>
                 <div className="price">${booking.totalPrice}</div>
                 <div className="price-label">Total</div>
+
+                <div style={{ marginTop: '0.5rem' }}>
+                  <button
+                    onClick={() => handlePredictBooking(booking)}
+                    className="btn btn-outline"
+                    disabled={!!predictLoading[booking.bookingId]}
+                    style={{ width: '100%', marginBottom: 8 }}
+                  >
+                    {predictLoading[booking.bookingId] ? 'Predicting...' : 'Predict Price'}
+                  </button>
+
+                  {predictResults[booking.bookingId] && (
+                    <div style={{ fontSize: '0.95rem', color: '#222' }}>
+                      {predictResults[booking.bookingId].error ? (
+                        <div className="text-danger">{predictResults[booking.bookingId].error}</div>
+                      ) : (
+                        <div>
+                          <div>
+                            <strong>Predicted / night:</strong> {predictResults[booking.bookingId].predictedAdrPerNight} {predictResults[booking.bookingId].currency}
+                          </div>
+                          <div>
+                            <strong>Predicted total:</strong> {predictResults[booking.bookingId].predictedTotal} {predictResults[booking.bookingId].currency}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                </div>
+
                 <div className="mt-2">
                   <span
                     className={`status-badge ${
-                      booking.status === 'Confirmed'
-                        ? 'status-confirmed'
-                        : booking.status === 'Cancelled'
-                        ? 'status-cancelled'
-                        : 'status-pending'
+                      booking.status === 'Confirmed' ? 'status-confirmed' : booking.status === 'Cancelled' ? 'status-cancelled' : 'status-pending'
                     }`}
                   >
                     {booking.status}
                   </span>
                 </div>
+
                 {booking.status === 'Confirmed' && canCancel(booking.checkInDate) && (
-                  <button
-                    onClick={() => handleCancelBooking(booking.bookingId)}
-                    className="btn btn-danger mt-2"
-                    style={{ width: '100%' }}
-                  >
+                  <button onClick={() => handleCancelBooking(booking.bookingId)} className="btn btn-danger mt-2" style={{ width: '100%' }}>
                     Cancel Booking
                   </button>
                 )}
                 {booking.status === 'Confirmed' && !canCancel(booking.checkInDate) && (
-                  <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.5rem' }}>
-                    Cannot cancel (less than 24h)
-                  </p>
+                  <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.5rem' }}>Cannot cancel (less than 24h)</p>
                 )}
               </div>
             </div>

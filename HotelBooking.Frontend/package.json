@@ -26,6 +26,10 @@
       "react-app",
       "react-app/jest"
     ]
+    ,
+    "rules": {
+      "unicode-bom": "off"
+    }
   },
   "browserslist": {
     "production": [

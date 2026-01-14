@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import date
 import pandas as pd
@@ -10,6 +11,15 @@ from pydantic import BaseModel, Field
 MODEL_PATH = os.getenv("MODEL_PATH", "artifacts/adr_model.joblib")
 
 app = FastAPI(title="Pricing Service", version="1.0")
+
+# Allow cross-origin requests from local frontend during development
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 if not os.path.exists(MODEL_PATH):
     raise RuntimeError(f"Model not found: {MODEL_PATH}. Run train.py first.")
